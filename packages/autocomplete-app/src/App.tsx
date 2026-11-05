@@ -116,9 +116,6 @@ function App() {
     }));
   }, [settingsHeight, settingsWidth]);
 
-  // useEffect(() => {
-  //   loadPrivateSpecs(authClient).catch(captureError);
-  // }, []);
 
   const isLoading = isLoadingSuggestions;
 

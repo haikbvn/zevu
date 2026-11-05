@@ -36,7 +36,6 @@ use crate::event::{
     WindowEvent,
 };
 use crate::platform::PlatformState;
-use crate::webview::DASHBOARD_SIZE;
 use crate::webview::notification::WebviewNotificationsState;
 use crate::{
     AUTOCOMPLETE_ID,
@@ -207,51 +206,6 @@ pub fn log_level(LogLevelCommand { level }: LogLevelCommand) -> LocalResult {
     ))))
 }
 
-pub async fn login(proxy: &EventLoopProxy) -> LocalResult {
-    proxy
-        .send_event(Event::WindowEvent {
-            window_id: DASHBOARD_ID,
-            window_event: WindowEvent::Batch(vec![
-                WindowEvent::UpdateWindowGeometry {
-                    size: Some(DASHBOARD_SIZE),
-                    position: None,
-                    anchor: None,
-                    tx: None,
-                    dry_run: false,
-                },
-                WindowEvent::Reload,
-                WindowEvent::Show,
-            ]),
-        })
-        .map_err(|err| error!(?err))
-        .ok();
-
-    proxy
-        .send_event(Event::ReloadTray { is_logged_in: true })
-        .map_err(|err| error!(?err))
-        .ok();
-
-    Ok(LocalResponse::Success(None))
-}
-
-pub async fn logout(proxy: &EventLoopProxy) -> LocalResult {
-    fig_auth::logout().await.ok();
-
-    proxy
-        .send_event(Event::WindowEvent {
-            window_id: DASHBOARD_ID,
-            window_event: WindowEvent::Batch(vec![WindowEvent::Reload, WindowEvent::Show]),
-        })
-        .map_err(|err| error!(?err))
-        .ok();
-
-    proxy
-        .send_event(Event::ReloadTray { is_logged_in: false })
-        .map_err(|err| error!(?err))
-        .ok();
-
-    Ok(LocalResponse::Success(None))
-}
 
 pub fn dump_state(
     command: DumpStateCommand,
@@ -275,28 +229,6 @@ pub fn dump_state(
     ))))
 }
 
-#[allow(unused_variables)]
-pub async fn connect_to_ibus(proxy: EventLoopProxy, platform_state: &PlatformState) -> LocalResult {
-    cfg_if::cfg_if! {
-        if #[cfg(target_os = "linux")] {
-            use crate::platform::ibus::launch_ibus_connection;
-            match launch_ibus_connection(proxy, platform_state.inner()).await {
-                Ok(_) => Ok(LocalResponse::Success(None)),
-                Err(err) => {
-                    Err(LocalResponse::Error {
-                        code: None,
-                        message: Some(format!("Failed connecting to ibus: {:?}", err)),
-                    })
-                },
-            }
-        } else {
-            Err(LocalResponse::Error {
-                code: None,
-                message: Some("Connecting to IBus is only supported on Linux".to_owned()),
-            })
-        }
-    }
-}
 
 pub async fn bundle_metadata(ctx: &Context) -> LocalResult {
     match fig_util::manifest::bundle_metadata_json(ctx).await {

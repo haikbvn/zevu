@@ -4,7 +4,11 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist"]
+      "outputs": ["dist/**"]
+    },
+    "zevu-terminal-companion#build": {
+      "outputs": ["zevu-terminal-companion-0.2.0.vsix"],
+      "cache": false
     },
     "lint": {
       "dependsOn": ["@amzn/eslint-config#build"],

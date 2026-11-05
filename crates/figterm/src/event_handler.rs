@@ -10,7 +10,6 @@ use fig_proto::remote_hooks::{
     new_preexec_hook,
     new_prompt_hook,
 };
-// use fig_telemetry::sentry::configure_scope;
 use flume::Sender;
 use tracing::level_filters::LevelFilter;
 use tracing::{
@@ -22,7 +21,6 @@ use crate::history::{
     HistoryCommand,
     HistorySender,
 };
-use crate::inline::on_prompt;
 use crate::{
     INSERT_ON_NEW_CMD,
     MainLoopEvent,
@@ -114,8 +112,6 @@ impl EventListener for EventHandler {
                 }
             },
             Event::CommandInfo(command_info) => {
-                tokio::spawn(on_prompt());
-
                 let context = shell_state_to_context(shell_state);
                 let hook = new_postexec_hook(context, command_info.command.clone(), command_info.exit_code);
                 let message = hook_to_message(hook);
@@ -127,14 +123,7 @@ impl EventListener for EventHandler {
                     error!(%err, "Sender error");
                 }
             },
-            Event::ShellChanged => {
-                // let shell = &shell_state.local_context.shell;
-                // configure_scope(|scope| {
-                //     if let Some(shell) = shell {
-                //         scope.set_tag("shell", shell);
-                //     }
-                // });
-            },
+            Event::ShellChanged => {},
         }
     }
 

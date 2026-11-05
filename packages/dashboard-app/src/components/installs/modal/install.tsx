@@ -15,25 +15,16 @@ type installKey = "dotfiles" | "accessibility" | "inputMethod";
 
 export default function InstallModal({
   check,
-  skip,
   next,
 }: {
   check: InstallCheck;
-  skip: () => void;
   next: () => void;
 }) {
   const [explainerOpen, setExplainerOpen] = useState(false);
-  const [isInstalled] = useStatusCheck(check.installKey as installKey);
-  const [timeElapsed, setTimeElapsed] = useState(false);
+  const [isInstalled, refreshStatus] = useStatusCheck(check.installKey as installKey);
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (timeElapsed) return;
-
-    const timer = setTimeout(() => setTimeElapsed(true), 10000);
-    return () => clearTimeout(timer);
-  }, [check, timeElapsed]);
 
   // Skip already installed checks.
   useEffect(() => {
@@ -44,51 +35,23 @@ export default function InstallModal({
   // Reset local state on new check.
   useEffect(() => {
     setExplainerOpen(false);
-    setTimeElapsed(false);
     setChecking(false);
     setError(null);
-  }, [check, setExplainerOpen, setTimeElapsed, setChecking, setError]);
+  }, [check]);
 
   function handleInstall(key: InstallCheck["installKey"]) {
     if (!key) return;
 
-    if (checking) {
-      next();
-      return;
-    }
-
     setChecking(true);
 
     Install.install(key)
-      .then(() => {
-        if (key === "accessibility") {
-          // The accessibility request is asynchronous - this only opens the accessibility
-          // panel. We get notified when accessibility has been enabled in a separate subscription,
-          // so we should return early here.
-          return;
-        }
-        if (key === "desktopEntry") {
-          // The app should autostart by default, thus immediately install the autostart entry.
-          Install.install("autostartEntry")
-            .then(() => {
-              setChecking(false);
-              next();
-            })
-            .catch((e) => {
-              setError(
-                `Failed to install the local autostart entry: ${e.message}`,
-              );
-              setTimeElapsed(true);
-              console.error(e);
-            });
-        } else {
-          setChecking(false);
-          next();
-        }
+      .then(async () => {
+        await refreshStatus();
+        setChecking(false);
       })
       .catch((e) => {
-        setError(e.message);
-        setTimeElapsed(true);
+        setChecking(false);
+        setError(String(e));
         console.error(e);
       });
   }
@@ -122,14 +85,6 @@ export default function InstallModal({
         >
           {checking ? check.actionWaitingText || "Waiting..." : check.action}
         </Button>
-        {(timeElapsed || check.skippable) && (
-          <button
-            className={"text-xs text-zinc-400 dark:text-zinc-400 self-center"}
-            onClick={skip}
-          >
-            skip
-          </button>
-        )}
         {check.explainer && (
           <Collapsible open={explainerOpen} onOpenChange={setExplainerOpen}>
             <CollapsibleTrigger asChild className="text-zinc-400">

@@ -1,176 +1,154 @@
-use std::path::PathBuf;
-use std::sync::Arc;
-
-use fig_integrations::Integration;
-use fig_integrations::shell::ShellExt;
-use fig_integrations::ssh::SshIntegration;
-use fig_os_shim::{
-    Context,
-    Env,
-};
-use fig_util::{
-    CHAT_BINARY_NAME,
-    CLI_BINARY_NAME,
-    OLD_CLI_BINARY_NAMES,
-    OLD_PTY_BINARY_NAMES,
-    PTY_BINARY_NAME,
-    Shell,
-    directories,
-};
-
+use std::{path::{Path, PathBuf}, sync::Arc};
+use fig_integrations::{Integration, shell::ShellExt};
+use fig_os_shim::{Context, Env};
+use fig_util::{CLI_BINARY_NAME, PTY_BINARY_NAME, Shell, directories};
 use crate::Error;
 
 bitflags::bitflags! {
-    /// The different components that can be installed.
+    /// Local components only. User data is never an uninstall component.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub struct InstallComponents: u64 {
-        /// Removal of the integrations from user's dotfiles
-        const SHELL_INTEGRATIONS    = 0b00000001;
-        /// This handles the removal of the CLI and pty binaries as well as legacy copies
-        const BINARY                = 0b00000010;
-        /// Removal of the ssh integration from the ~/.ssh/config file
-        const SSH                   = 0b00000100;
-        const DESKTOP_APP           = 0b00001000;
-        const INPUT_METHOD          = 0b00010000;
-        const DESKTOP_ENTRY         = 0b00100000;
-        const GNOME_SHELL_EXTENSION = 0b01000000;
+        const SHELL_INTEGRATIONS = 1;
+        const BINARY = 2;
+        const DESKTOP_APP = 8;
+        const INPUT_METHOD = 16;
+        const IDE_EXTENSIONS = 32;
     }
 }
 
-#[cfg(target_os = "linux")]
-impl InstallComponents {
-    pub fn all_linux_minimal() -> Self {
-        Self::SHELL_INTEGRATIONS | Self::BINARY | Self::SSH
+fn binary_target(name: &str) -> PathBuf {
+    fig_util::app_bundle_path().join("Contents/MacOS").join(name)
+}
+
+fn owns_link(path: &Path, target: &Path) -> Result<bool, Error> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            let existing = std::fs::read_link(path)?;
+            let suffix = Path::new(fig_util::APP_BUNDLE_NAME).join("Contents/MacOS").join(target.file_name().unwrap());
+            Ok(existing == target || (existing.is_absolute() && existing.ends_with(suffix)))
+        },
+        Ok(_) => Ok(false),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(err.into()),
     }
 }
 
-pub async fn uninstall(components: InstallComponents, ctx: Arc<Context>) -> Result<(), Error> {
-    let ssh_result = if components.contains(InstallComponents::SSH) {
-        SshIntegration::new()?.uninstall().await
-    } else {
-        Ok(())
-    };
+/// Install only Zevu links, rejecting foreign files and links before changing anything.
+pub fn install_binary_links() -> Result<(), Error> {
+    let bin = directories::home_local_bin()?;
+    let pairs = binary_links(&bin);
+    install_links(&bin, &pairs)
+}
 
-    let shell_integration_result = {
-        for shell in [Shell::Bash, Shell::Zsh, Shell::Fish] {
-            for integration in shell.get_shell_integrations(ctx.env())? {
-                integration.uninstall().await?;
-            }
+fn binary_links(bin: &Path) -> Vec<(PathBuf, PathBuf)> {
+    let mut pairs = vec![
+        (bin.join(CLI_BINARY_NAME), binary_target(CLI_BINARY_NAME)),
+        (bin.join(PTY_BINARY_NAME), binary_target(PTY_BINARY_NAME)),
+    ];
+    pairs.extend(Shell::all().iter().map(|shell| (
+        bin.join(format!("{shell} ({PTY_BINARY_NAME})")),
+        binary_target(PTY_BINARY_NAME),
+    )));
+    pairs
+}
+
+fn install_links(bin: &Path, pairs: &[(PathBuf, PathBuf)]) -> Result<(), Error> {
+    for (path, target) in pairs {
+        if !target.is_file() {
+            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, format!("missing bundled executable: {}", target.display())).into());
         }
-        Ok(())
-    };
-
-    if components.contains(InstallComponents::BINARY) {
-        let remove_binary = |path: PathBuf| async move {
-            match tokio::fs::remove_file(&path).await {
-                Ok(_) => tracing::info!("Removed binary: {path:?}"),
-                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {},
-                Err(err) => tracing::warn!(%err, "Failed to remove binary: {path:?}"),
-            }
-        };
-
-        // let folders = [directories::home_local_bin()?, Path::new("/usr/local/bin").into()];
-        let folders = [directories::home_local_bin()?];
-
-        let mut all_binary_names = vec![CLI_BINARY_NAME, CHAT_BINARY_NAME, PTY_BINARY_NAME];
-        all_binary_names.extend(OLD_CLI_BINARY_NAMES);
-        all_binary_names.extend(OLD_PTY_BINARY_NAMES);
-
-        let mut pty_names = vec![PTY_BINARY_NAME];
-        pty_names.extend(OLD_PTY_BINARY_NAMES);
-
-        for folder in folders {
-            for binary_name in &all_binary_names {
-                let binary_path = folder.join(binary_name);
-                remove_binary(binary_path).await;
-            }
-
-            for shell in Shell::all() {
-                for pty_name in &pty_names {
-                    let pty_path = folder.join(format!("{shell} ({pty_name})"));
-                    remove_binary(pty_path).await;
-                }
-            }
+        if std::fs::symlink_metadata(path).is_ok() && !owns_link(path, target)? {
+            return Err(Error::Conflict(path.clone()));
         }
     }
-
-    #[cfg(target_os = "linux")]
-    if components.contains(InstallComponents::GNOME_SHELL_EXTENSION) {
-        let shell_extensions = dbus::gnome_shell::ShellExtensions::new(Arc::downgrade(&ctx));
-        super::os::uninstall_gnome_extension(&ctx, &shell_extensions).await?;
-    }
-
-    #[cfg(target_os = "linux")]
-    if components.contains(InstallComponents::DESKTOP_ENTRY) {
-        super::os::uninstall_desktop_entries(&ctx).await?;
-    }
-
-    let daemon_result = Ok(());
-
-    #[cfg(target_os = "macos")]
-    if components.contains(InstallComponents::INPUT_METHOD) {
-        use fig_integrations::Error;
-        use fig_integrations::input_method::{
-            InputMethod,
-            InputMethodError,
-        };
-
-        match InputMethod::default().uninstall().await {
-            Ok(_) | Err(Error::InputMethod(InputMethodError::CouldNotListInputSources)) => {},
-            Err(err) => return Err(err.into()),
+    std::fs::create_dir_all(bin)?;
+    for (path, target) in pairs {
+        if std::fs::read_link(path).ok().as_deref() != Some(target.as_path()) {
+            if owns_link(path, target)? { std::fs::remove_file(path)?; }
+            std::os::unix::fs::symlink(target, path)?;
         }
     }
-
-    if components.contains(InstallComponents::DESKTOP_APP) {
-        super::os::uninstall_desktop(&ctx).await?;
-        // Must be last -- this will kill the running desktop process if this is
-        // called from the desktop app.
-        let quit_res = tokio::process::Command::new("killall")
-            .args([fig_util::consts::APP_PROCESS_NAME])
-            .output()
-            .await;
-        if let Err(err) = quit_res {
-            tracing::warn!("Failed to quit running Fig app: {err}");
-        }
-    }
-
-    daemon_result
-        .and(shell_integration_result)
-        .and(ssh_result.map_err(|e| e.into()))
+    Ok(())
 }
 
 pub async fn install(components: InstallComponents, env: &Env) -> Result<(), Error> {
+    if components.contains(InstallComponents::BINARY) { install_binary_links()?; }
     if components.contains(InstallComponents::SHELL_INTEGRATIONS) {
-        let mut errs: Vec<Error> = vec![];
         for shell in Shell::all() {
-            match shell.get_shell_integrations(env) {
-                Ok(integrations) => {
-                    for integration in integrations {
-                        if let Err(e) = integration.install().await {
-                            errs.push(e.into());
-                        }
-                    }
-                },
-                Err(e) => {
-                    errs.push(e.into());
-                },
+            if fig_integrations::shell::shell_executable(*shell, env).is_none() {
+                tracing::info!(%shell, "Skipping shell: executable not installed");
+                continue;
             }
-        }
-
-        if let Some(err) = errs.pop() {
-            return Err(err);
+            for integration in shell.get_shell_integrations(env)? { integration.install().await?; }
         }
     }
-
-    if components.contains(InstallComponents::SSH) {
-        SshIntegration::new()?.install().await?;
-    }
-
     #[cfg(target_os = "macos")]
-    if components.contains(InstallComponents::INPUT_METHOD) {
-        use fig_integrations::input_method::InputMethod;
-        InputMethod::default().install().await?;
+    {
+        if components.contains(InstallComponents::INPUT_METHOD) {
+            fig_integrations::input_method::InputMethod::default().install().await?;
+        }
+        if components.contains(InstallComponents::IDE_EXTENSIONS) {
+            for variant in fig_integrations::vscode::variants_installed() {
+                fig_integrations::vscode::VSCodeIntegration { variant }.install().await?;
+            }
+            for integration in fig_integrations::intellij::variants_installed().await? { integration.install().await?; }
+        }
     }
-
     Ok(())
+}
+
+pub async fn uninstall(components: InstallComponents, ctx: Arc<Context>) -> Result<(), Error> {
+    if components.contains(InstallComponents::SHELL_INTEGRATIONS) {
+        for shell in Shell::all() {
+            for integration in shell.get_shell_integrations(ctx.env())? { integration.uninstall().await?; }
+        }
+    }
+    if components.contains(InstallComponents::BINARY) {
+        let bin = directories::home_local_bin()?;
+        for (path, target) in binary_links(&bin) {
+            if owns_link(&path, &target)? { std::fs::remove_file(path)?; }
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if components.contains(InstallComponents::IDE_EXTENSIONS) { crate::macos::uninstall_terminal_integrations().await?; }
+        if components.contains(InstallComponents::INPUT_METHOD) { fig_integrations::input_method::InputMethod::default().uninstall().await?; }
+        if components.contains(InstallComponents::DESKTOP_APP) { crate::macos::uninstall_desktop(&ctx).await?; }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn link_ownership_preserves_foreign_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("zevu");
+        let target = dir.path().join("Zevu.app/Contents/MacOS/zevu");
+        std::fs::write(&path, "user file").unwrap();
+        assert!(!owns_link(&path, &target).unwrap());
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(&target, "binary").unwrap();
+        assert!(matches!(install_links(dir.path(), &[(path.clone(), target.clone())]), Err(Error::Conflict(_))));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "user file");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "user file");
+        std::fs::remove_file(&path).unwrap();
+        std::os::unix::fs::symlink("/foreign/zevu", &path).unwrap();
+        assert!(!owns_link(&path, &target).unwrap());
+        assert!(matches!(install_links(dir.path(), &[(path.clone(), target.clone())]), Err(Error::Conflict(_))));
+        assert_eq!(std::fs::read_link(&path).unwrap(), Path::new("/foreign/zevu"));
+        std::fs::remove_file(&path).unwrap();
+        std::os::unix::fs::symlink(&target, &path).unwrap();
+        assert!(owns_link(&path, &target).unwrap());
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(&target, "binary").unwrap();
+        install_links(dir.path(), &[(path.clone(), target.clone())]).unwrap();
+        install_links(dir.path(), &[(path.clone(), target.clone())]).unwrap();
+        assert_eq!(std::fs::read_link(&path).unwrap(), target);
+        std::fs::remove_file(&path).unwrap();
+        std::os::unix::fs::symlink("/old/Zevu.app/Contents/MacOS/zevu", &path).unwrap();
+        install_links(dir.path(), &[(path.clone(), target.clone())]).unwrap();
+        assert_eq!(std::fs::read_link(&path).unwrap(), target);
+    }
 }

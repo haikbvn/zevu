@@ -25,7 +25,6 @@ use fig_proto::figterm::{
     self,
     FigtermRequestMessage,
     FigtermResponseMessage,
-    TelemetryRequest,
 };
 use fig_proto::remote::{
     Clientbound,
@@ -44,17 +43,14 @@ use tracing::{
 };
 
 use crate::event_handler::EventHandler;
-use crate::history::HistorySender;
 use crate::interceptor::KeyInterceptor;
 use crate::pty::AsyncMasterPty;
 use crate::{
     EXPECTED_BUFFER,
     INSERT_ON_NEW_CMD,
     INSERTION_LOCKED_AT,
-    MainLoopEvent,
     SHELL_ALIAS,
     SHELL_ENVIRONMENT_VARIABLES,
-    inline,
     shell_state_to_context,
 };
 
@@ -153,7 +149,6 @@ fn create_command(executable: impl AsRef<Path>, working_directory: impl AsRef<Pa
 /// Process the inner figterm request enum, shared between local and remote
 pub async fn process_figterm_request(
     figterm_request: FigtermRequest,
-    main_loop_tx: Sender<MainLoopEvent>,
     term: &Term<EventHandler>,
     pty_master: &mut Box<dyn AsyncMasterPty + Send + Sync>,
     key_interceptor: &mut KeyInterceptor,
@@ -276,61 +271,20 @@ pub async fn process_figterm_request(
             }
             Ok(None)
         },
-        FigtermRequest::NotifySshSessionStarted(notification) => {
-            main_loop_tx
-                .send(MainLoopEvent::PromptSSH {
-                    uuid: notification.uuid,
-                    remote_host: notification.remote_host,
-                })
-                .ok();
-            Ok(None)
-        },
-        FigtermRequest::InlineShellCompletion(_) => anyhow::bail!("InlineShellCompletion is not supported over remote"),
-        FigtermRequest::InlineShellCompletionAccept(_) => {
-            anyhow::bail!("InlineShellCompletionAccept is not supported over remote")
-        },
-        FigtermRequest::InlineShellCompletionSetEnabled(_) => {
-            anyhow::bail!("InlineShellCompletionSetEnabled is not supported over remote")
-        },
-        FigtermRequest::Telemtety(_) => anyhow::bail!("Telemetry is not supported over remote"),
     }
 }
 
 /// Process a figterm request message
-#[allow(clippy::too_many_arguments)]
 pub async fn process_figterm_message(
     figterm_request_message: FigtermRequestMessage,
-    main_loop_tx: Sender<MainLoopEvent>,
     response_tx: Sender<FigtermResponseMessage>,
     term: &Term<EventHandler>,
-    history_sender: &HistorySender,
     pty_master: &mut Box<dyn AsyncMasterPty + Send + Sync>,
     key_interceptor: &mut KeyInterceptor,
-    session_id: &str,
 ) -> Result<()> {
     match figterm_request_message.request {
-        Some(FigtermRequest::InlineShellCompletion(request)) => {
-            let history_sender = history_sender.clone();
-            let session_id = session_id.to_owned();
-
-            tokio::spawn(inline::handle_request(request, session_id, response_tx, history_sender));
-        },
-        Some(FigtermRequest::InlineShellCompletionAccept(request)) => {
-            tokio::spawn(inline::handle_accept(request, session_id.to_owned()));
-        },
-        Some(FigtermRequest::InlineShellCompletionSetEnabled(request)) => {
-            tokio::spawn(inline::handle_set_enabled(request, session_id.to_owned()));
-        },
-        Some(FigtermRequest::Telemtety(TelemetryRequest { event_blob })) => {
-            match fig_telemetry::AppTelemetryEvent::from_json(&event_blob) {
-                Ok(event) => {
-                    tokio::spawn(fig_telemetry::send_event(event));
-                },
-                Err(err) => error!(%err, "Failed to parse telemetry event"),
-            }
-        },
         Some(request) => {
-            match process_figterm_request(request, main_loop_tx, term, pty_master, key_interceptor).await {
+            match process_figterm_request(request, term, pty_master, key_interceptor).await {
                 Ok(Some(response)) => {
                     let response_message = FigtermResponseMessage {
                         response: Some(response),
@@ -361,7 +315,6 @@ async fn send_figterm_response_hostbound(
                 nonce,
                 response: Some(match response {
                     FigtermResponse::Diagnostics(diagnostics) => Response::Diagnostics(diagnostics),
-                    FigtermResponse::InlineShellCompletion(_) => unreachable!(),
                 }),
             })),
         };
@@ -374,7 +327,6 @@ async fn send_figterm_response_hostbound(
 
 pub async fn process_remote_message(
     clientbound_message: Clientbound,
-    main_loop_tx: Sender<MainLoopEvent>,
     response_tx: Sender<Hostbound>,
     term: &Term<EventHandler>,
     pty_master: &mut Box<dyn AsyncMasterPty + Send + Sync>,
@@ -400,7 +352,6 @@ pub async fn process_remote_message(
                     send_figterm_response_hostbound(
                         process_figterm_request(
                             FigtermRequest::InsertText(request),
-                            main_loop_tx,
                             term,
                             pty_master,
                             key_interceptor,
@@ -415,7 +366,6 @@ pub async fn process_remote_message(
                     send_figterm_response_hostbound(
                         process_figterm_request(
                             FigtermRequest::Intercept(request),
-                            main_loop_tx,
                             term,
                             pty_master,
                             key_interceptor,
@@ -430,7 +380,6 @@ pub async fn process_remote_message(
                     send_figterm_response_hostbound(
                         process_figterm_request(
                             FigtermRequest::Diagnostics(request),
-                            main_loop_tx,
                             term,
                             pty_master,
                             key_interceptor,
@@ -445,7 +394,6 @@ pub async fn process_remote_message(
                     send_figterm_response_hostbound(
                         process_figterm_request(
                             FigtermRequest::InsertOnNewCmd(request),
-                            main_loop_tx,
                             term,
                             pty_master,
                             key_interceptor,

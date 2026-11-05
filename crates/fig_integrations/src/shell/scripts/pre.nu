@@ -38,13 +38,13 @@ let should_launch = (
 if $should_launch {
   let Q_SHELL = ({{CLI_BINARY_NAME}} _ get-shell | complete).stdout
   
-  let fig_term_name = "nu (figterm)"
-  let figterm_path = if ([$env.HOME ".fig" "bin" $fig_term_name] | path join | path exists) {
-    [$env.HOME ".fig" "bin" $fig_term_name] | path join
-  } else if (which figterm | length) > 0 {
-    which figterm | first | get path
+  let fig_term_name = "nu ({{PTY_BINARY_NAME}})"
+  let figterm_path = if ([$env.HOME ".local" "bin" $fig_term_name] | path join | path exists) {
+    [$env.HOME ".local" "bin" $fig_term_name] | path join
+  } else if (which {{PTY_BINARY_NAME}} | length) > 0 {
+    which {{PTY_BINARY_NAME}} | first | get path
   } else {
-    [$env.HOME ".fig" "bin" "figterm"] | path join
+    [$env.HOME ".local" "bin" "{{PTY_BINARY_NAME}}"] | path join
   }
 
   with-env {

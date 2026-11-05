@@ -1,265 +1,270 @@
 use std::borrow::Cow;
-use std::sync::{
-    Arc,
-    LazyLock,
+use std::io::ErrorKind;
+use std::path::{
+    Component,
+    Path,
 };
+use std::sync::Arc;
 
-use anyhow::Result;
-use fig_auth::builder_id_token;
 use fig_os_shim::Context;
-use fig_request::reqwest::Client;
-use fnv::FnvHashSet;
-use futures::prelude::*;
-use serde::{
-    Deserialize,
-    Serialize,
-};
-use tokio::sync::{
-    MappedMutexGuard,
-    Mutex,
-    MutexGuard,
-};
-use tracing::error;
-use url::Url;
+use percent_encoding::percent_decode_str;
 use wry::http::header::CONTENT_TYPE;
 use wry::http::{
-    HeaderValue,
     Request,
     Response,
     StatusCode,
 };
 
+use super::util::{
+    res_400,
+    res_404,
+    res_500,
+};
 use crate::webview::WindowId;
 
-const APPLICATION_JAVASCRIPT: HeaderValue = HeaderValue::from_static("application/javascript");
-
-#[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AuthType {
-    None,
-    Midway,
-}
-
-impl AuthType {
-    pub async fn get(&self, default_client: &Client, url: Url) -> Result<fig_request::reqwest::Response> {
-        match self {
-            AuthType::Midway => Ok(fig_request::midway::midway_request(url).await?.error_for_status()?),
-            _ => Ok(default_client.get(url).send().await?.error_for_status()?),
-        }
+fn serve_spec(root: &Path, request: &Request<Vec<u8>>) -> anyhow::Result<Response<Cow<'static, [u8]>>> {
+    if request.uri().host() != Some("localhost") {
+        return res_400();
     }
-}
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct CdnSource {
-    url: Url,
-    auth_type: AuthType,
-}
+    // Strip only the URI's leading slash, then decode once. A second slash or an
+    // encoded leading slash must not turn a request into an absolute file path.
+    let uri_path = request.uri().path();
+    let relative = uri_path.strip_prefix('/').unwrap_or(uri_path);
+    let decoded = match percent_decode_str(relative).decode_utf8() {
+        Ok(decoded) => decoded,
+        Err(_) => return res_400(),
+    };
+    let relative = Path::new(decoded.as_ref());
+    if decoded.contains('\0')
+        || relative.is_absolute()
+        || relative.components().any(|component| {
+            matches!(component, Component::ParentDir | Component::RootDir | Component::Prefix(_))
+        })
+    {
+        return res_400();
+    }
 
-static CDNS: LazyLock<Vec<CdnSource>> = LazyLock::new(|| {
-    vec![
-        // Public cdn
-        CdnSource {
-            url: "https://specs.q.us-east-1.amazonaws.com".try_into().unwrap(),
-            auth_type: AuthType::None,
-        },
-        // Internal Amazon spec cdn
-        CdnSource {
-            url: "https://prod.us-east-1.shellspecs.jupiter.ai.aws.dev"
-                .try_into()
-                .unwrap(),
-            auth_type: AuthType::Midway,
-        },
-    ]
-});
-
-fn res_404() -> Response<Cow<'static, [u8]>> {
-    Response::builder()
-        .status(StatusCode::NOT_FOUND)
-        .header(CONTENT_TYPE, "text/plain")
-        .body(b"Not Found".as_ref().into())
-        .unwrap()
-}
-
-fn res_ok(bytes: Vec<u8>, content_type: HeaderValue) -> Response<Cow<'static, [u8]>> {
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(CONTENT_TYPE, content_type)
-        .body(bytes.into())
-        .unwrap()
-}
-
-#[derive(Debug, Clone)]
-struct SpecIndexMeta {
-    cdn_source: CdnSource,
-    spec_index: SpecIndex,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SpecIndex {
-    completions: Vec<String>,
-    diff_versioned_completions: Vec<String>,
-}
-
-static INDEX_CACHE: Mutex<Option<Vec<Result<SpecIndexMeta>>>> = Mutex::const_new(None);
-
-pub async fn clear_index_cache() {
-    *INDEX_CACHE.lock().await = None;
-}
-
-async fn remote_index_json(client: &Client) -> MappedMutexGuard<'_, Vec<Result<SpecIndexMeta>>> {
-    let mut cache = INDEX_CACHE.lock().await;
-
-    if cache.is_none() {
-        *cache = Some(
-            future::join_all(CDNS.iter().map(|cdn_source| async move {
-                if AuthType::Midway == cdn_source.auth_type {
-                    let auth_token = match builder_id_token().await {
-                        Ok(auth_token) => match auth_token {
-                            Some(auth_token) => auth_token,
-                            None => return None,
+    let root = match root.canonicalize() {
+        Ok(root) => root,
+        Err(err) if err.kind() == ErrorKind::NotFound => return res_404(),
+        Err(err) => return res_500(err),
+    };
+    let mut requested_path = root.join(relative);
+    let mut symlink_resolutions = 0;
+    let path = 'resolve: loop {
+        match requested_path.canonicalize() {
+            Ok(path) => break path,
+            Err(err) if err.kind() == ErrorKind::NotFound => {
+                // Inspect missing paths too: their nearest existing ancestor
+                // (or a dangling symlink's target) must remain in the bundle.
+                for ancestor in requested_path.ancestors() {
+                    match ancestor.canonicalize() {
+                        Ok(ancestor) if !ancestor.starts_with(&root) => return res_400(),
+                        Ok(_) => return res_404(),
+                        Err(err) if err.kind() == ErrorKind::NotFound => {},
+                        Err(err) => return res_500(err),
+                    }
+                    match ancestor.symlink_metadata() {
+                        Ok(metadata) if metadata.file_type().is_symlink() => {
+                            symlink_resolutions += 1;
+                            if symlink_resolutions > 40 {
+                                return res_500(std::io::Error::other("Too many symbolic links"));
+                            }
+                            let target = match std::fs::read_link(ancestor) {
+                                Ok(target) => target,
+                                Err(err) => return res_500(err),
+                            };
+                            let target = if target.is_absolute() {
+                                target
+                            } else {
+                                ancestor.parent().unwrap_or(&root).join(target)
+                            };
+                            let suffix = requested_path.strip_prefix(ancestor)?;
+                            requested_path = if suffix.as_os_str().is_empty() {
+                                target
+                            } else {
+                                target.join(suffix)
+                            };
+                            continue 'resolve;
                         },
-                        Err(err) => {
-                            error!(%err, "Failed to load auth");
-                            return None;
-                        },
-                    };
-
-                    if !auth_token.is_amzn_user() {
-                        return None;
+                        Ok(_) => {},
+                        Err(err) if err.kind() == ErrorKind::NotFound => {},
+                        Err(err) => return res_500(err),
                     }
                 }
-
-                let mut url = cdn_source.url.clone();
-                url.set_path("index.json");
-
-                let response = match cdn_source.auth_type.get(client, url).await {
-                    Ok(response) => response,
-                    Err(err) => {
-                        error!(%err, "Failed to fetch spec index");
-                        return Some(Err(err));
-                    },
-                };
-
-                let spec_index = match response.json().await {
-                    Ok(s) => s,
-                    Err(s) => {
-                        error!(%s, "Failed to parse spec index");
-                        return Some(Err(s.into()));
-                    },
-                };
-
-                Some(Ok(SpecIndexMeta {
-                    cdn_source: cdn_source.clone(),
-                    spec_index,
-                }))
-            }))
-            .await
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>(),
-        );
-    }
-
-    MutexGuard::map(cache, |cache| cache.as_mut().unwrap())
-}
-
-async fn merged_index_json(client: &Client) -> Result<SpecIndex> {
-    let mut completions = FnvHashSet::default();
-    let mut diff_versioned_completions = FnvHashSet::default();
-
-    for res in remote_index_json(client).await.iter() {
-        match res {
-            Ok(meta) => {
-                completions.extend(meta.spec_index.completions.clone());
-                diff_versioned_completions.extend(meta.spec_index.diff_versioned_completions.clone());
+                return res_404();
             },
-            Err(err) => {
-                tracing::error!(%err, "failed to fetch spec index");
-            },
+            Err(err) => return res_500(err),
         }
+    };
+    if !path.starts_with(&root) {
+        return res_400();
     }
 
-    let mut completions: Vec<_> = completions.into_iter().collect();
-    completions.sort();
+    let content = match std::fs::read(&path) {
+        Ok(content) => content,
+        Err(err) if err.kind() == ErrorKind::NotFound => return res_404(),
+        Err(err) => return res_500(err),
+    };
+    let mime = match path.extension().and_then(|extension| extension.to_str()) {
+        Some("js") => mime::APPLICATION_JAVASCRIPT_UTF_8.as_ref(),
+        Some("json") => mime::APPLICATION_JSON.as_ref(),
+        Some("svg") => mime::IMAGE_SVG.as_ref(),
+        Some("png") => mime::IMAGE_PNG.as_ref(),
+        Some("jpg" | "jpeg") => mime::IMAGE_JPEG.as_ref(),
+        _ => mime::APPLICATION_OCTET_STREAM.as_ref(),
+    };
 
-    let mut diff_versioned_completions: Vec<_> = diff_versioned_completions.into_iter().collect();
-    diff_versioned_completions.sort();
-
-    Ok(SpecIndex {
-        completions,
-        diff_versioned_completions,
-    })
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header(CONTENT_TYPE, mime)
+        .body(content.into())?)
 }
 
-// handle `spec://localhost/spec.js`
+/// Serve the bundled catalogue, including nested and versioned specs.
 pub async fn handle(
-    _ctx: Arc<Context>,
+    ctx: Arc<Context>,
     request: Request<Vec<u8>>,
     _: WindowId,
 ) -> anyhow::Result<Response<Cow<'static, [u8]>>> {
-    let Some(client) = fig_request::client() else {
-        return Ok(res_404());
-    };
-
-    let path = request.uri().path();
-
-    if path == "/index.json" {
-        let index = merged_index_json(client).await?;
-        Ok(res_ok(
-            serde_json::to_vec(&index)?,
-            "application/json".try_into().unwrap(),
-        ))
-    } else {
-        // default to trying the first cdn
-        let mut cdn_source = CDNS[0].clone();
-
-        let spec_name = path.strip_prefix('/').unwrap_or(path);
-        let spec_name = spec_name.strip_suffix(".js").unwrap_or(spec_name);
-
-        for meta in remote_index_json(client).await.iter().skip(1).flatten() {
-            if meta
-                .spec_index
-                .completions
-                .binary_search_by(|name| name.as_str().cmp(spec_name))
-                .is_ok()
-            {
-                cdn_source = meta.cdn_source.clone();
-                break;
-            }
-        }
-
-        let mut url = cdn_source.url.clone();
-        url.set_path(path);
-
-        let response = cdn_source.auth_type.get(client, url).await?;
-
-        let content_type = response
-            .headers()
-            .get(http::header::CONTENT_TYPE)
-            .cloned()
-            .unwrap_or(APPLICATION_JAVASCRIPT);
-
-        Ok(res_ok(
-            response.bytes().await?.to_vec(),
-            content_type.as_bytes().try_into()?,
-        ))
-    }
+    let root = fig_util::directories::resources_path_ctx(&ctx)?.join("specs");
+    serve_spec(&root, &request)
 }
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
 
-    #[test]
-    fn cdns() {
-        println!("{:?}", *CDNS);
+    fn request(path: &str) -> Request<Vec<u8>> {
+        Request::builder().uri(path).body(Vec::new()).unwrap()
     }
 
-    #[tokio::test]
-    async fn test_index_json() {
-        let client = Client::new();
-        let index = remote_index_json(&client).await;
-        println!("{index:?}");
+    #[test]
+    fn serves_catalogue_index() {
+        let root = tempfile::tempdir().unwrap();
+        let index = serde_json::json!({
+            "completions": ["git", "npm", "aws"],
+            "diffVersionedCompletions": ["aws"]
+        });
+        let bytes = serde_json::to_vec(&index).unwrap();
+        fs::write(root.path().join("index.json"), &bytes).unwrap();
+
+        let response = serve_spec(root.path(), &request("spec://localhost/index.json")).unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[CONTENT_TYPE], "application/json");
+        assert_eq!(response.body().as_ref(), bytes.as_slice());
+        assert_eq!(serde_json::from_slice::<serde_json::Value>(response.body()).unwrap(), index);
+    }
+
+    #[test]
+    fn serves_javascript_and_nested_versioned_specs() {
+        let root = tempfile::tempdir().unwrap();
+        let javascript = b"export default { name: 'git' };";
+        for name in ["git.js", "aws/index.js", "aws/2.0.0.js", "nested/spec.js", "space name.js", "%2e%2e.js"] {
+            let path = root.path().join(name);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, javascript).unwrap();
+        }
+
+        for name in ["git.js", "aws/index.js", "aws/2.0.0.js", "nested/spec.js", "space%20name.js", "%252e%252e.js"] {
+            let response = serve_spec(root.path(), &request(&format!("spec://localhost/{name}"))).unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{name}");
+            assert_eq!(response.headers()[CONTENT_TYPE], "application/javascript; charset=utf-8");
+            assert_eq!(response.body().as_ref(), javascript);
+        }
+    }
+
+    #[test]
+    fn serves_bundled_icon_bytes_with_image_mime() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join("icons")).unwrap();
+        for (name, bytes, mime) in [
+            ("file.png", b"\x89PNG\r\n\x1a\n".as_slice(), "image/png"),
+            ("folder.svg", b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>".as_slice(), "image/svg+xml"),
+            ("image.jpg", b"\xff\xd8\xff".as_slice(), "image/jpeg"),
+        ] {
+            fs::write(root.path().join("icons").join(name), bytes).unwrap();
+            let response = serve_spec(root.path(), &request(&format!("spec://localhost/icons/{name}"))).unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{name}");
+            assert_eq!(response.headers()[CONTENT_TYPE], mime, "{name}");
+            assert_eq!(response.body().as_ref(), bytes, "{name}");
+        }
+    }
+
+    #[test]
+    fn missing_catalogue_and_files_are_not_found_without_spa_fallback() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(root.path().join("index.html"), "not a spec").unwrap();
+        for name in ["index.json", "missing.js", "missing", "nested/missing.js"] {
+            let response = serve_spec(root.path(), &request(&format!("spec://localhost/{name}"))).unwrap();
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{name}");
+            assert!(!response.body().is_empty());
+        }
+        let response = serve_spec(&root.path().join("absent"), &request("spec://localhost/index.json")).unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn rejects_other_hosts_and_unsafe_paths() {
+        let root = tempfile::tempdir().unwrap();
+        for uri in [
+            "spec://example.com/index.json",
+            "spec://localhost.evil/index.json",
+            "spec://localhost//etc/passwd",
+            "spec://localhost/%2Fetc/passwd",
+            "spec://localhost/../outside.js",
+            "spec://localhost/%2e%2e/outside.js",
+            "spec://localhost/nested/%2E%2E/outside.js",
+            "spec://localhost/nested%2f..%2foutside.js",
+            "spec://localhost/invalid%00.js",
+            "spec://localhost/%ff.js",
+            "/index.json",
+        ] {
+            let response = serve_spec(root.path(), &request(uri)).unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{uri}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlink_escapes_but_serves_contained_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(outside.path().join("outside.js"), "private").unwrap();
+        fs::write(root.path().join("inside.js"), "export default {};").unwrap();
+        symlink(outside.path(), root.path().join("escape")).unwrap();
+        symlink(root.path().join("inside.js"), root.path().join("alias.js")).unwrap();
+        symlink(outside.path().join("missing.js"), root.path().join("dangling.js")).unwrap();
+        symlink("dangling.js", root.path().join("chained.js")).unwrap();
+        symlink("missing.js", root.path().join("contained-missing.js")).unwrap();
+        symlink(outside.path().join("missing"), root.path().join("dangling-directory")).unwrap();
+
+        for name in [
+            "escape/outside.js",
+            "escape/missing.js",
+            "dangling.js",
+            "chained.js",
+            "dangling-directory/child.js",
+        ] {
+            let response = serve_spec(root.path(), &request(&format!("spec://localhost/{name}"))).unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{name}");
+        }
+        let response = serve_spec(root.path(), &request("spec://localhost/alias.js")).unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let response = serve_spec(root.path(), &request("spec://localhost/contained-missing.js")).unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn read_errors_are_server_errors() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join("directory.js")).unwrap();
+        let response = serve_spec(root.path(), &request("spec://localhost/directory.js")).unwrap();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 }

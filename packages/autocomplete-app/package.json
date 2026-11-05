@@ -5,8 +5,8 @@
   "repository": "https://github.com/aws/amazon-q-developer-cli",
   "type": "module",
   "scripts": {
-    "set-host": "fig settings developer.autocomplete.host http://localhost:3124",
-    "remove-host": "fig settings developer.autocomplete.host --delete",
+    "set-host": "zevu settings developer.autocomplete.host http://localhost:3124",
+    "remove-host": "zevu settings developer.autocomplete.host --delete",
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",

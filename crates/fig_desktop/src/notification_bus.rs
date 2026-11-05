@@ -4,7 +4,6 @@ use dashmap::DashMap;
 use fnv::FnvBuildHasher;
 use serde_json::Value;
 use tokio::sync::broadcast::{
-    self,
     Receiver,
     Sender,
 };
@@ -42,7 +41,6 @@ impl JsonNotification {
 pub struct NotificationBus {
     state_channels: DashMap<String, Sender<JsonNotification>, FnvBuildHasher>,
     settings_channels: DashMap<String, Sender<JsonNotification>, FnvBuildHasher>,
-    midway_channel: Sender<()>,
 }
 
 impl std::default::Default for NotificationBus {
@@ -50,7 +48,6 @@ impl std::default::Default for NotificationBus {
         Self {
             state_channels: DashMap::default(),
             settings_channels: DashMap::default(),
-            midway_channel: broadcast::channel(CHANNEL_SIZE).0,
         }
     }
 }
@@ -80,9 +77,6 @@ impl NotificationBus {
             .subscribe()
     }
 
-    pub fn subscribe_midway(&self) -> Receiver<()> {
-        self.midway_channel.subscribe()
-    }
 
     pub fn send_state(&self, key: impl AsRef<str>, value: JsonNotification) {
         if let Some(tx) = self.state_channels.get(key.as_ref()) {
@@ -96,9 +90,6 @@ impl NotificationBus {
         }
     }
 
-    pub fn send_midway(&self) {
-        self.midway_channel.send(()).ok();
-    }
 
     pub fn send_state_new(&self, key: impl AsRef<str>, value: &Value) {
         if let Some(tx) = self.state_channels.get(key.as_ref()) {

@@ -1,3 +1,3 @@
 #!/usr/bin/env bash
 
-trap 'yarn remove-host' SIGINT; { sleep 0.5 && yarn set-host; } & vite --port 3124
+trap 'corepack pnpm remove-host' SIGINT SIGTERM EXIT; { sleep 0.5 && corepack pnpm set-host; } & corepack pnpm exec vite --port 3124

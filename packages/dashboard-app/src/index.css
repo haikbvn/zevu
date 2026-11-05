@@ -73,10 +73,6 @@
 
     --radius: 0.5rem;
 
-    /* Amazon Q Developer CLI upgrade banner colors */
-    --q-banner-bg: #262626;
-    --q-banner-border: #8e48ff;
-    --q-banner-link: #b07fff;
   }
 
   body {
@@ -113,10 +109,6 @@
     --input: 240 3.7% 15.9%;
     --ring: 240 4.9% 83.9%;
 
-    /* Amazon Q Developer CLI upgrade banner colors */
-    --q-banner-bg: #262626;
-    --q-banner-border: #8e48ff;
-    --q-banner-link: #b07fff;
   }
 }
 
@@ -173,10 +165,6 @@
       #301673;
   }
 
-  .q-banner {
-    background-color: var(--q-banner-bg);
-    border: 1px solid var(--q-banner-border);
-  }
 }
 
 /* Currently an issue with Linux webkit CSS variables */

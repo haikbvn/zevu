@@ -495,7 +495,21 @@ impl WindowState {
 
                 }
             },
-            WindowEvent::SetEnabled(enabled) => self.set_enabled(enabled),
+            WindowEvent::SetEnabled(enabled) => {
+                self.set_enabled(enabled);
+                if !enabled {
+                    // Gating future events does not dismiss an already visible window
+                    // or release figterm's visibility-based key interception.
+                    self.handle(
+                        WindowEvent::Hide,
+                        figterm_state,
+                        platform_state,
+                        notifications_state,
+                        window_target,
+                        api_tx,
+                    );
+                }
+            },
             WindowEvent::SetTheme(theme) => self.set_theme(theme),
             WindowEvent::Drag => {
                 if let Err(err) = self.window.drag_window() {

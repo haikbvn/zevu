@@ -12,7 +12,7 @@ const csp: Record<string, string> = {
   // blob: is needed for loading dev specs
   "script-src": "'self' spec: blob:",
   "style-src": "'self' spec:",
-  "img-src": "'self' data: fig: icon: https:",
+  "img-src": "'self' data: fig: icon: spec: https:",
   "connect-src": "'self' spec: api:",
   "object-src": "'none'",
   "frame-src": "'none'",
@@ -72,7 +72,6 @@ export default defineConfig(({ mode, command }) => {
     },
     build: {
       target: command === "build" ? "es2017" : "esnext",
-      // TODO: re-enable prod source maps to upload them to sentry (see build CIs)
       sourcemap: command !== "build",
       rollupOptions: {
         external: [

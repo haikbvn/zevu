@@ -114,9 +114,14 @@ impl Shell {
                 Some(dir) => Ok(dir),
                 None => Ok(directories::home_dir()?),
             },
-            Shell::Fish => match env.get_os("__fish_config_dir").map(PathBuf::from) {
-                Some(dir) => Ok(dir),
-                None => Ok(directories::home_dir()?.join(".config").join("fish")),
+            Shell::Fish => {
+                if let Some(dir) = env.get_os("__fish_config_dir").filter(|dir| !dir.is_empty()) {
+                    Ok(PathBuf::from(dir))
+                } else if let Some(dir) = env.get_os("XDG_CONFIG_HOME").filter(|dir| !dir.is_empty()) {
+                    Ok(PathBuf::from(dir).join("fish"))
+                } else {
+                    Ok(directories::home_dir()?.join(".config").join("fish"))
+                }
             },
             Shell::Nu => Ok(directories::config_dir()?.join("nushell")),
         }
@@ -210,6 +215,27 @@ mod tests {
                 .unwrap_or_else(|err| panic!("exe {} failed. Error: {:?}", exe_path_str, err));
             println!("{}: {version:?}\n", exe_path.display());
         }
+    }
+
+    #[test]
+    fn fish_config_directory_precedence() {
+        let fish = Env::from_slice(&[
+            ("__fish_config_dir", "/tmp/fish-own"),
+            ("XDG_CONFIG_HOME", "/tmp/xdg"),
+        ]);
+        assert_eq!(Shell::Fish.get_config_directory(&fish).unwrap(), PathBuf::from("/tmp/fish-own"));
+
+        let xdg = Env::from_slice(&[
+            ("__fish_config_dir", ""),
+            ("XDG_CONFIG_HOME", "/tmp/xdg"),
+        ]);
+        assert_eq!(Shell::Fish.get_config_directory(&xdg).unwrap(), PathBuf::from("/tmp/xdg/fish"));
+
+        let empty = Env::from_slice(&[("__fish_config_dir", ""), ("XDG_CONFIG_HOME", "")]);
+        assert_eq!(
+            Shell::Fish.get_config_directory(&empty).unwrap(),
+            directories::home_dir().unwrap().join(".config/fish"),
+        );
     }
 
     #[test]

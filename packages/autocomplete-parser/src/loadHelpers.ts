@@ -3,7 +3,6 @@ import * as semver from "semver";
 import {
   ensureTrailingSlash,
   withTimeout,
-  exponentialBackoff,
 } from "@aws/amazon-q-developer-cli-shared/utils";
 import {
   executeCommand,
@@ -12,7 +11,7 @@ import {
 } from "@aws/amazon-q-developer-cli-api-bindings-wrappers";
 import z from "zod";
 import { MOST_USED_SPECS } from "./constants.js";
-import { LoadLocalSpecError, SpecCDNError } from "./errors.js";
+import { LoadLocalSpecError } from "./errors.js";
 
 export type SpecFileImport =
   | {
@@ -24,14 +23,6 @@ export type SpecFileImport =
       versions: Fig.VersionDiffMap;
     };
 
-const makeCdnUrlFactory =
-  (baseUrl: string) =>
-  (specName: string, ext: string = "js") =>
-    `${baseUrl}${specName}.${ext}`;
-
-const cdnUrlFactory = makeCdnUrlFactory(
-  "https://specs.q.us-east-1.amazonaws.com/",
-);
 
 const stringImportCache = new Map<string, unknown>();
 
@@ -77,59 +68,25 @@ export async function importSpecFromFile(
   return importString(result);
 }
 
-/**
- * Specs can only be loaded from non "secure" contexts, so we can't load from https
- */
-export const canLoadSpecProtocol = () => window.location.protocol !== "https:";
-
-// TODO: this is a problem for diff-versioned specs
-export async function importFromPublicCDN<T = SpecFileImport>(
+/** Load a global catalogue module from the application's bundled resources. */
+export async function importFromBundledSpecs<T = SpecFileImport>(
   name: string,
 ): Promise<T> {
-  if (canLoadSpecProtocol()) {
-    return withTimeout(
-      20000,
-      import(
-        /* @vite-ignore */
-        `spec://localhost/${name}.js`
-      ),
-    );
-  }
-
-  // Total of retries in the worst case should be close to previous timeout value
-  // 500ms * 2^5 + 5 * 1000ms + 5 * 100ms = 21500ms, before the timeout was 20000ms
-  try {
-    return await exponentialBackoff(
-      {
-        attemptTimeout: 1000,
-        baseDelay: 500,
-        maxRetries: 5,
-        jitter: 100,
-      },
-
-      () => import(/* @vite-ignore */ cdnUrlFactory(name)),
-    );
-  } catch {
-    /**/
-  }
-
-  throw new SpecCDNError("Unable to load from a CDN");
+  return withTimeout(
+    20000,
+    import(
+      /* @vite-ignore */
+      `spec://localhost/${name}.js`
+    ),
+  );
 }
 
-async function jsonFromPublicCDN(path: string): Promise<unknown> {
-  if (canLoadSpecProtocol()) {
-    return fetch(`spec://localhost/${path}.json`).then((res) => res.json());
+async function jsonFromBundledSpecs(path: string): Promise<unknown> {
+  const response = await fetch(`spec://localhost/${path}.json`);
+  if (!response.ok) {
+    throw new Error(`Unable to load bundled spec ${path}: ${response.status}`);
   }
-
-  return exponentialBackoff(
-    {
-      attemptTimeout: 1000,
-      baseDelay: 500,
-      maxRetries: 5,
-      jitter: 100,
-    },
-    () => fetch(cdnUrlFactory(path, "json")).then((res) => res.json()),
-  );
+  return response.json();
 }
 
 // TODO: this is a problem for diff-versioned specs
@@ -189,8 +146,7 @@ export async function getVersionFromFullFile(
   return undefined;
 }
 
-// TODO: cache this request using SWR strategy
-let publicSpecsRequest:
+let bundledSpecsRequest:
   | Promise<{
       completions: Set<string>;
       diffVersionedSpecs: Set<string>;
@@ -198,7 +154,7 @@ let publicSpecsRequest:
   | undefined;
 
 export function clearSpecIndex() {
-  publicSpecsRequest = undefined;
+  bundledSpecsRequest = undefined;
 }
 
 const INDEX_ZOD = z.object({
@@ -206,29 +162,29 @@ const INDEX_ZOD = z.object({
   diffVersionedCompletions: z.array(z.string()),
 });
 
-const createPublicSpecsRequest = async () => {
-  if (publicSpecsRequest === undefined) {
-    publicSpecsRequest = jsonFromPublicCDN("index")
+const createBundledSpecsRequest = async () => {
+  if (bundledSpecsRequest === undefined) {
+    bundledSpecsRequest = jsonFromBundledSpecs("index")
       .then(INDEX_ZOD.parse)
       .then((index) => ({
         completions: new Set(index.completions),
         diffVersionedSpecs: new Set(index.diffVersionedCompletions),
       }))
       .catch(() => {
-        publicSpecsRequest = undefined;
+        bundledSpecsRequest = undefined;
         return { completions: new Set(), diffVersionedSpecs: new Set() };
       });
   }
-  return publicSpecsRequest;
+  return bundledSpecsRequest;
 };
 
-export async function publicSpecExists(name: string): Promise<boolean> {
-  const { completions } = await createPublicSpecsRequest();
+export async function bundledSpecExists(name: string): Promise<boolean> {
+  const { completions } = await createBundledSpecsRequest();
   return completions.has(name);
 }
 
 export async function isDiffVersionedSpec(name: string): Promise<boolean> {
-  const { diffVersionedSpecs } = await createPublicSpecsRequest();
+  const { diffVersionedSpecs } = await createBundledSpecsRequest();
   return diffVersionedSpecs.has(name);
 }
 
@@ -238,9 +194,9 @@ export async function preloadSpecs(): Promise<SpecFileImport[]> {
       // TODO: refactor everything to allow the correct diff-versioned specs to be loaded
       // too, now we are only loading the index
       if (await isDiffVersionedSpec(name)) {
-        return importFromPublicCDN(`${name}/index`);
+        return importFromBundledSpecs(`${name}/index`);
       }
-      return importFromPublicCDN(name);
+      return importFromBundledSpecs(name);
     }).map((promise) => promise.catch((e) => e)),
   );
 }

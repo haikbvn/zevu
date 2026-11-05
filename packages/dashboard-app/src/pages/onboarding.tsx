@@ -1,102 +1,79 @@
 import autocompleteDemo from "@assets/images/autocomplete_demo.gif";
-import translateDemo from "@assets/images/translate_demo.gif";
-import chatDemo from "@assets/images/chat_demo.gif";
-import { Link } from "@/components/ui/link";
-import { AUTOCOMPLETE_SSH_WIKI_URL, KIRO_CLI_URL } from "@/lib/constants";
+import { useEffect, useState } from "react";
+import { Fig, Internal, State } from "@aws/amazon-q-developer-cli-api-bindings";
 import { Terminal } from "@/components/ui/terminal";
-import { KiroLogo } from "@/components/svg/logo";
+import { Button } from "@/components/ui/button";
+import Modal from "@/components/modal";
+import InstallModal from "@/components/installs/modal";
+import StatusCheck from "@/components/installs/statusCheck";
+import checks from "@/data/install";
+import { useAccessibilityCheck, useDotfilesCheck, useInputMethodCheck } from "@/hooks/store";
+import { useLocalStateZodDefault, useRefreshLocalState } from "@/hooks/store/useState";
+import { z } from "zod";
 
 export default function Page() {
+  const [shell, refreshShell] = useDotfilesCheck();
+  const [accessibility, refreshAccessibility] = useAccessibilityCheck();
+  const [inputMethod, refreshInputMethod] = useInputMethodCheck();
+  const [inputMethodRequired] = useLocalStateZodDefault("desktop.inputMethodRequired", z.boolean(), false);
+  const [complete] = useLocalStateZodDefault("desktop.completedOnboarding", z.boolean(), false);
+  const refreshState = useRefreshLocalState();
+  const [repair, setRepair] = useState(false);
+  const [error, setError] = useState("");
+  const [checksCurrent, setChecksCurrent] = useState(false);
+  const localChecksPass = checksCurrent && shell === true && accessibility === true && (!inputMethodRequired || inputMethod === true);
+  const ready = localChecksPass && complete;
+
+  useEffect(() => {
+    let active = true;
+    const refresh = async () => {
+      try {
+        await Promise.all([refreshShell(), refreshAccessibility(), refreshInputMethod(), refreshState()]);
+        if (active) {
+          setChecksCurrent(true);
+          setError("");
+        }
+      } catch (err) {
+        if (active) {
+          setChecksCurrent(false);
+          setError(String(err));
+        }
+      }
+    };
+    void refresh();
+    const timer = setInterval(() => void refresh(), 2000);
+    return () => { active = false; clearInterval(timer); };
+  }, [refreshShell, refreshAccessibility, refreshInputMethod, refreshState]);
+
+  useEffect(() => {
+    if (!localChecksPass) {
+      if (complete && checksCurrent) {
+        State.set("desktop.completedOnboarding", false)
+          .then(() => refreshState())
+          .catch((err) => setError(String(err)));
+      }
+      return;
+    }
+    setRepair(false);
+    if (!complete) {
+      Internal.sendOnboardingRequest({ action: Fig.OnboardingAction.FINISH_ONBOARDING })
+        .then(() => refreshState())
+        .catch((err) => setError(String(err)));
+    }
+  }, [localChecksPass, checksCurrent, complete, refreshState]);
+
   return (
     <div className="flex flex-col items-start gap-4">
-      <div className="flex flex-col">
-        <h1 className="text-2xl font-bold dark:text-zinc-400">
-          Getting started
-        </h1>
-      </div>
-      <section className="flex flex-col p-6 gap-4 w-full rounded-2xl items-start text-white q-banner">
-        <div className="flex flex-row gap-4 w-full items-center">
-          <div className="flex-shrink-0">
-            <KiroLogo size={60} />
-          </div>
-          <div className="flex flex-col gap-1">
-            <h1 className="font-bold text-lg font-ember leading-none">
-              Amazon Q Developer CLI users can now upgrade to the Kiro CLI
-            </h1>
-            <p className="text-sm leading-tight">
-              Your existing Q Developer CLI workflows and subscription continue
-              to work without any changes. You can update to Kiro CLI manually
-              with{" "}
-              <code style={{ color: "var(--q-banner-link)" }}>q update</code>{" "}
-              today, or wait for the auto-update on 11/24 to apply the change.{" "}
-              <Link
-                href={KIRO_CLI_URL}
-                className="font-medium no-underline"
-                variant="primary"
-                style={{ color: "var(--q-banner-link)" }}
-              >
-                Learn more &gt;
-              </Link>
-            </p>
-          </div>
-        </div>
-      </section>
+      <div className="flex flex-col"><h1 className="text-2xl font-bold dark:text-zinc-400">Getting started</h1></div>
       <div className="flex flex-col gap-2 w-full border bg-zinc-50 border-zinc-200 dark:bg-zinc-900 dark:border-zinc-600 rounded-lg p-4 mb-4 overflow-x-auto">
-        <h2 className="font-bold font-ember tracking-tight text-lg dark:text-zinc-300">
-          Launch a new shell session to start using autocomplete!
-        </h2>
-        <ol className="flex flex-col gap-0.5 text-zinc-600 dark:text-zinc-400">
-          <li>
-            <span className="text-sm flex items-baseline gap-1">
-              <span className="font-semibold">Not working?</span>
-              <span>Check out</span>
-              <Link to="/help" variant="blue">
-                Help & support
-              </Link>
-            </span>
-          </li>
-          <li>
-            <span className="text-sm">
-              <span className="font-semibold">Want to customize settings?</span>{" "}
-              Use the tabs in the sidebar.
-            </span>
-          </li>
-          <li>
-            <div className="text-sm flex flex-row items-center gap-1 flex-wrap">
-              <div className="w-10.5">
-                <div className="rounded-full px-2 py-0.5 bg-rose-400/50 dark:bg-rose-600/50 border border-rose-400/80 dark:border-rose-600/80 relative motion-safe:animate-shine before:absolute before:inset-0 before:transform before:-translate-x-full motion-safe:before:animate-shimmer before:bg-gradient-to-r before:filter before:from-rose-600/0 before:via-rose-600/40 before:to-bg-rose-600/0 isolate overflow-hidden mb-0">
-                  <span className="relative z-10 flex items-center">
-                    <p className="tracking-normal text-xs font-medium text-black dark:text-white">
-                      New
-                    </p>
-                  </span>
-                </div>
-              </div>
-              <span className="font-semibold whitespace-nowrap">
-                Want to use SSH?
-              </span>
-              <span className="whitespace-pre">
-                See{" "}
-                <Link href={AUTOCOMPLETE_SSH_WIKI_URL} variant="blue">
-                  Using CLI Autocomplete on a remote machine
-                </Link>{" "}
-                for more information.
-              </span>
-            </div>
-          </li>
-        </ol>
+        <h2 className="font-bold font-ember tracking-tight text-lg dark:text-zinc-300">{ready ? "Zevu is ready" : "Zevu setup status"}</h2>
+        <p className="text-sm text-zinc-600 dark:text-zinc-400">{ready ? "Open a new shell session to use autocomplete. Customize appearance and keybindings in the sidebar." : "Complete the local checks below to enable autocomplete. No account is required."}</p>
+        {error && <p role="alert" className="text-sm text-red-500">{error}</p>}
+        {!ready && <Button onClick={() => setRepair(true)}>Repair setup</Button>}
       </div>
-      <Terminal tabNames={["Autocomplete", "Translation", "Chat"]}>
-        <Terminal.Tab>
-          <img src={autocompleteDemo} alt="autocomplete demo" />
-        </Terminal.Tab>
-        <Terminal.Tab>
-          <img src={translateDemo} alt="translation demo" />
-        </Terminal.Tab>
-        <Terminal.Tab>
-          <img src={chatDemo} alt="chat demo" />
-        </Terminal.Tab>
-      </Terminal>
+      {checks.filter((check) => check.id !== "inputMethod" || inputMethodRequired).map((check) => <StatusCheck key={check.id} check={check} />)}
+      <Terminal tabNames={["Autocomplete"]}><Terminal.Tab><img src={autocompleteDemo} alt="Autocomplete demo" /></Terminal.Tab></Terminal>
+      {repair && !ready && <Modal><InstallModal /></Modal>}
     </div>
   );
 }

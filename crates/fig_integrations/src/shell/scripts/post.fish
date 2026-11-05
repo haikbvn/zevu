@@ -1,8 +1,9 @@
 builtin contains $HOME/.local/bin $PATH
 or set --append PATH $HOME/.local/bin
 
-set --query TTY; or set TTY (command tty)
-set --export TTY
+# This script is piped into source; stderr retains the terminal's original fd.
+# Export the value in the same assignment: `set --export TTY` would erase it.
+set --export TTY (command tty <&2)
 
 set --export SHELL_PID $fish_pid
 

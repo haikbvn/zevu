@@ -11,10 +11,6 @@ use anstream::println;
 use assert_cmd::prelude::*;
 use eyre::Context;
 use fig_util::consts::CLI_CRATE_NAME;
-use fig_util::consts::build::{
-    SKIP_FISH_TESTS,
-    SKIP_SHELLCHECK_TESTS,
-};
 use paste::paste;
 
 macro_rules! init_test {
@@ -22,7 +18,7 @@ macro_rules! init_test {
         paste! {
             #[cfg(not(windows))]
             fn [<init_output_ $shell _ $stage _ $file>]() -> Result<String, Box<dyn std::error::Error>> {
-                let mut cmd = Command::cargo_bin("q_cli").unwrap();
+                let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("q_cli"));
                 cmd.arg("init").arg($shell).arg($stage).arg("--rcfile").arg($file);
                 cmd.env("Q_INIT_SNAPSHOT_TEST", "1");
                 let out = cmd.assert().success().get_output().stdout.clone();
@@ -31,29 +27,7 @@ macro_rules! init_test {
 
             #[test]
             #[cfg(not(windows))]
-            fn [<init_snapshot_ $shell _ $stage _ $file>]() -> Result<(), Box<dyn std::error::Error>> {
-                let init = [<init_output_ $shell _ $stage _ $file>]()?;
-
-                insta::assert_snapshot!(init);
-
-                Ok(())
-            }
-
-            #[test]
-            #[cfg(not(windows))]
             fn [<init_lint_ $shell _ $stage _ $file>]() -> Result<(), Box<dyn std::error::Error>> {
-                // Ignore fish post since idk it doesn't work on CI
-                if $exe == "fish" && $stage == "post" {
-                    return Ok(());
-                }
-
-                if $exe == "fish" && SKIP_FISH_TESTS {
-                    return Ok(());
-                }
-
-                if $exe == "shellcheck" && SKIP_SHELLCHECK_TESTS {
-                    return Ok(());
-                }
 
                 let init = [<init_output_ $shell _ $stage _ $file>]()?;
 

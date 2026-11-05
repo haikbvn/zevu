@@ -22,7 +22,6 @@ use crate::Result;
 use crate::error::DbOpenError;
 
 const STATE_TABLE_NAME: &str = "state";
-const AUTH_TABLE_NAME: &str = "auth_kv";
 
 pub static DATABASE: LazyLock<Result<Db, DbOpenError>> = LazyLock::new(|| {
     let db = Db::new().map_err(|e| DbOpenError(e.to_string()))?;
@@ -61,8 +60,7 @@ const MIGRATIONS: &[Migration] = migrations![
     "001_history_table",
     "002_drop_history_in_ssh_docker",
     "003_improved_history_timing",
-    "004_state_table",
-    "005_auth_table"
+    "004_state_table"
 ];
 
 #[derive(Debug, Clone)]
@@ -118,7 +116,7 @@ impl Db {
         let max_version = max_migration_version(&transaction);
 
         for (version, migration) in MIGRATIONS.iter().enumerate() {
-            if has_migration(&transaction, version, max_version)? {
+            if max_version.is_some_and(|max| max >= version as i64) {
                 continue;
             }
 
@@ -154,10 +152,6 @@ impl Db {
         self.get_value(STATE_TABLE_NAME, key)
     }
 
-    pub fn get_auth_value(&self, key: impl AsRef<str>) -> Result<Option<String>> {
-        self.get_value(AUTH_TABLE_NAME, key)
-    }
-
     fn set_value<T: ToSql>(&self, table: &'static str, key: impl AsRef<str>, value: T) -> Result<()> {
         self.pool.get()?.execute(
             &format!("INSERT OR REPLACE INTO {table} (key, value) VALUES (?1, ?2)"),
@@ -170,10 +164,6 @@ impl Db {
         self.set_value(STATE_TABLE_NAME, key, value.into())
     }
 
-    pub fn set_auth_value(&self, key: impl AsRef<str>, value: impl Into<String>) -> Result<()> {
-        self.set_value(AUTH_TABLE_NAME, key, value.into())
-    }
-
     fn unset_value(&self, table: &'static str, key: impl AsRef<str>) -> Result<()> {
         self.pool
             .get()?
@@ -183,10 +173,6 @@ impl Db {
 
     pub fn unset_state_value(&self, key: impl AsRef<str>) -> Result<()> {
         self.unset_value(STATE_TABLE_NAME, key)
-    }
-
-    pub fn unset_auth_value(&self, key: impl AsRef<str>) -> Result<()> {
-        self.unset_value(AUTH_TABLE_NAME, key)
     }
 
     fn is_value_set(&self, table: &'static str, key: impl AsRef<str>) -> Result<bool> {
@@ -201,10 +187,6 @@ impl Db {
 
     pub fn is_state_value_set(&self, key: impl AsRef<str>) -> Result<bool> {
         self.is_value_set(STATE_TABLE_NAME, key)
-    }
-
-    pub fn is_auth_value_set(&self, key: impl AsRef<str>) -> Result<bool> {
-        self.is_value_set(AUTH_TABLE_NAME, key)
     }
 
     fn all_values(&self, table: &'static str) -> Result<Map<String, serde_json::Value>> {
@@ -286,41 +268,6 @@ fn max_migration_version<C: Deref<Target = Connection>>(conn: &C) -> Option<i64>
     stmt.query_row([], |row| row.get(0)).ok()
 }
 
-fn has_migration<C: Deref<Target = Connection>>(conn: &C, version: usize, max_version: Option<i64>) -> Result<bool> {
-    // IMPORTANT: Due to a bug with the first 7 migrations, we have to check manually
-    //
-    // Background: the migrations table stores two identifying keys: the sqlite auto-generated
-    // auto-incrementing key `id`, and the `version` which is the index of the `MIGRATIONS`
-    // constant.
-    //
-    // Checking whether a migration exists would compare id with version, but since id is 1-indexed
-    // and version is 0-indexed, we would actually skip the last migration! Therefore, it's
-    // possible users are missing a critical migration (namely, auth_kv table creation) when
-    // upgrading to the qchat build (which includes two new migrations). Hence, we have to check
-    // all migrations until version 7 to make sure that nothing is missed.
-    if version <= 7 {
-        let mut stmt = match conn.prepare("SELECT COUNT(*) FROM migrations WHERE version = ?1") {
-            Ok(stmt) => stmt,
-            // If the migrations table does not exist, then we can reasonably say no migrations
-            // will exist.
-            Err(Error::SqliteFailure(_, Some(msg))) if msg.contains("no such table") => {
-                return Ok(false);
-            },
-            Err(err) => return Err(err.into()),
-        };
-        let count: i32 = stmt.query_row([version], |row| row.get(0))?;
-        return Ok(count >= 1);
-    }
-
-    // Continuing from the previously implemented logic - any migrations after the 7th can have a simple
-    // maximum version check, since we can reasonably assume if any version >=7 will have all
-    // migrations prior to it.
-    #[allow(clippy::match_like_matches_macro)]
-    Ok(match max_version {
-        Some(max_version) if max_version >= version as i64 => true,
-        _ => false,
-    })
-}
 
 #[cfg(test)]
 mod tests {
@@ -405,19 +352,6 @@ mod tests {
         assert!(db.is_state_value_set("bool").unwrap());
     }
 
-    #[test]
-    fn auth_table_tests() {
-        let db = mock();
-
-        db.set_auth_value("test", "test").unwrap();
-        assert_eq!(db.get_auth_value("test").unwrap().unwrap(), "test");
-        assert!(db.is_auth_value_set("test").unwrap());
-        db.unset_auth_value("test").unwrap();
-        assert!(!db.is_auth_value_set("test").unwrap());
-
-        assert_eq!(db.get_auth_value("test2").unwrap(), None);
-        assert!(!db.is_auth_value_set("test2").unwrap());
-    }
 
     #[test]
     fn db_open_time() {

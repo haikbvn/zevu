@@ -1,0 +1,25 @@
+name: macOS
+on: [push, pull_request]
+jobs:
+  verify:
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare local dependencies
+        env:
+          ZEVU_DEPS_ONLY: "1"
+        run: bash scripts/setup.sh
+      - name: Build signed host bundle and companions
+        run: mise exec -- bash scripts/build-macos.sh
+      - name: Frontend regression suite
+        run: mise exec -- corepack pnpm exec vitest run
+      - name: Prepare real PTY executables
+        run: cargo build --locked -p q_cli -p figterm
+      - name: Rust and isolated shell regressions
+        run: cargo test --locked --workspace -- --test-threads=1
+      - name: Verify bundle
+        run: codesign --verify --deep --strict dist/Zevu.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Zevu-macos-host
+          path: dist/

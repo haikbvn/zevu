@@ -1269,12 +1269,19 @@ impl InputParser {
         // `CSI u` encodings for the ascii range;
         // see http://www.leonerd.org.uk/hacks/fixterms/
         for c in 0..=0x7fu8 {
+            let key_code = match c {
+                9 => KeyCode::Tab,
+                13 => KeyCode::Enter,
+                27 => KeyCode::Escape,
+                127 => KeyCode::Backspace,
+                _ => KeyCode::Char(c as char),
+            };
             for (suffix, modifiers) in modifier_combos_including_meta() {
                 let key = format!("\x1b[{c}{suffix}u");
                 map.insert(
                     key,
                     InputEvent::Key(KeyEvent {
-                        key: KeyCode::Char(c as char),
+                        key: key_code,
                         modifiers: *modifiers,
                     }),
                 );
@@ -1792,6 +1799,36 @@ impl InputParser {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn csi_u_functional_keys() {
+        let mut parser = InputParser::new();
+        for (code, key) in [
+            (9, KeyCode::Tab),
+            (13, KeyCode::Enter),
+            (27, KeyCode::Escape),
+            (127, KeyCode::Backspace),
+        ] {
+            for (suffix, modifiers) in [
+                ("", Modifiers::NONE),
+                (";1", Modifiers::NONE),
+                (";2", Modifiers::SHIFT),
+                (";5", Modifiers::CTRL),
+            ] {
+                let input = format!("\x1b[{code}{suffix}u");
+                let mut events = Vec::new();
+                parser.parse(input.as_bytes(), |raw, event| events.push((raw, event)), false);
+                assert_eq!(
+                    events,
+                    vec![(
+                        Some(Bytes::copy_from_slice(input.as_bytes())),
+                        InputEvent::Key(KeyEvent { key, modifiers }),
+                    )],
+                    "{input:?}",
+                );
+            }
+        }
+    }
 
     #[test]
     fn simple() {

@@ -1,9 +1,6 @@
-#[cfg(target_os = "linux")]
-mod cleanup;
 pub mod cli;
 mod event_handler;
 pub mod history;
-pub mod inline;
 pub mod input;
 pub mod interceptor;
 pub mod ipc;
@@ -11,7 +8,6 @@ pub mod logger;
 mod message;
 pub mod pty;
 pub mod term;
-pub mod update;
 
 use std::env;
 #[cfg(unix)]
@@ -32,11 +28,9 @@ use std::time::{
 use alacritty_terminal::Term;
 use alacritty_terminal::ansi::Processor;
 use alacritty_terminal::event::EventListener;
-use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::term::{
     ShellState,
     SizeInfo,
-    TextBuffer,
 };
 use anyhow::{
     Context as _,
@@ -66,7 +60,6 @@ use fig_proto::remote_hooks::{
     new_edit_buffer_hook,
 };
 use fig_settings::state;
-use fig_util::consts::CLI_BINARY_NAME;
 use fig_util::env_var::{
     Q_LOG_LEVEL,
     Q_SHELL,
@@ -83,10 +76,7 @@ use fig_util::{
     Terminal as FigTerminal,
     directories,
 };
-use flume::{
-    Receiver,
-    Sender,
-};
+use flume::Sender;
 #[cfg(unix)]
 use nix::unistd::execvp;
 use portable_pty::PtySize;
@@ -167,10 +157,6 @@ pub enum MainLoopEvent {
     },
     UnlockInterception,
     SetImmediateMode(bool),
-    PromptSSH {
-        uuid: String,
-        remote_host: String,
-    },
     SetCsiU,
     UnsetCsiU,
 }
@@ -227,74 +213,6 @@ fn get_cursor_coordinates(terminal: &dyn Terminal) -> Option<TerminalCursorCoord
             return None;
         }
     }
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn _should_install_remote_ssh_integration(
-    uuid: String,
-    remote_host: String,
-    main_loop_tx: Sender<MainLoopEvent>,
-    remote_receiver: Receiver<fig_proto::remote::Clientbound>,
-    remote_sender: Sender<Hostbound>,
-    term: &Term<EventHandler>,
-    pty_master: &mut Box<dyn crate::pty::AsyncMasterPty + Send + Sync>,
-    key_interceptor: &mut KeyInterceptor,
-) -> Option<bool> {
-    use fig_proto::remote::clientbound;
-
-    let remote_install_setting = fig_settings::settings::get_string_or("ssh.remote-prompt", "ask".into());
-    if remote_install_setting == "never" {
-        return Some(false);
-    }
-
-    let key = format!("ssh.remote-prompt.disable-host.{remote_host}");
-    let disable_host = fig_settings::state::get_bool_or(key, false);
-    if disable_host {
-        return Some(false);
-    }
-
-    let prompt_timeout: u64 = fig_settings::settings::get_int_or("ssh.remote-prompt.timeout", 2000)
-        .try_into()
-        .unwrap_or(2000);
-
-    // Wait for child ssh session to connect to local desktop instance.
-    let got_child_connection = tokio::time::timeout(tokio::time::Duration::from_millis(prompt_timeout), async {
-        loop {
-            if let Ok(msg) = remote_receiver.recv_async().await {
-                if let Some(clientbound::Packet::NotifyChildSessionStarted(clientbound::NotifyChildSessionStarted {
-                    parent_id,
-                })) = msg.packet
-                {
-                    if parent_id == uuid {
-                        return true;
-                    }
-                } else {
-                    process_remote_message(
-                        msg,
-                        main_loop_tx.clone(),
-                        remote_sender.clone(),
-                        term,
-                        pty_master,
-                        key_interceptor,
-                    )
-                    .await
-                    .ok();
-                }
-            }
-        }
-    })
-    .await
-    .is_ok();
-
-    if got_child_connection {
-        return Some(false);
-    }
-
-    if remote_install_setting == "always" {
-        return Some(true);
-    }
-
-    None
 }
 
 fn can_send_edit_buffer<T>(term: &Term<T>) -> bool
@@ -477,20 +395,12 @@ fn launch_shell(command: Option<&[String]>) -> Result<()> {
 
 fn figterm_main(command: Option<&[String]>) -> Result<()> {
     fig_settings::settings::init_global().ok();
-    fig_telemetry::init_global_telemetry_emitter();
 
-    let context = Context::new();
-
-    let session_id = match std::env::var("MOCK_QTERM_SESSION_ID") {
-        Ok(id) => id,
-        Err(_) => uuid::Uuid::new_v4().simple().to_string(),
-    };
+    let session_id = uuid::Uuid::new_v4().simple().to_string();
 
     unsafe {
         std::env::set_var(QTERM_SESSION_ID, &session_id);
     }
-
-    let parent_id = fig_os_shim::Env::new().q_parent().ok();
 
     let mut terminal = SystemTerminal::new_from_stdio()?;
     let screen_size = terminal.get_screen_size()?;
@@ -516,8 +426,7 @@ fn figterm_main(command: Option<&[String]>) -> Result<()> {
         Ok(logger_guard) => Some(logger_guard),
         Err(err) => {
             if !fig_settings::state::get_bool_or("pty.suppress_log_error", false) {
-                // let id = capture_anyhow(&err);
-                eprintln!("Fig failed to init logger: {err:?}");
+                eprintln!("{PRODUCT_NAME} failed to init logger: {err:?}");
             }
             None
         },
@@ -554,8 +463,6 @@ fn figterm_main(command: Option<&[String]>) -> Result<()> {
         .build()?;
 
     let runtime_result = runtime.block_on(async {
-        update::check_for_update(&context);
-
         terminal.set_raw_mode()?;
 
         let (main_loop_tx, main_loop_rx) = flume::bounded::<MainLoopEvent>(16);
@@ -568,7 +475,6 @@ fn figterm_main(command: Option<&[String]>) -> Result<()> {
         // Spawn thread to handle remote ipc
         let (remote_sender, remote_receiver, stop_ipc_tx) = spawn_remote_ipc(
             session_id.clone(),
-            parent_id,
             main_loop_tx.clone()
         ).await?;
 
@@ -602,8 +508,6 @@ fn figterm_main(command: Option<&[String]>) -> Result<()> {
             application_cursor_keys: false,
             newline_mode: false,
         };
-
-        let ai_enabled = fig_settings::settings::get_bool_or("ai.terminal-hash-sub", true);
 
         if let Ok(shell) = get_parent_shell() {
             let path = std::path::Path::new(&shell);
@@ -678,36 +582,6 @@ fn figterm_main(command: Option<&[String]>) -> Result<()> {
                                     stdout.flush().await?;
                                     csi_u_set = false;
                                 },
-                                MainLoopEvent::PromptSSH { uuid: _, remote_host: _ } => {
-                                    // let should_install = should_install_remote_ssh_integration(
-                                    //     uuid,
-                                    //     remote_host.clone(),
-                                    //     main_loop_tx.clone(),
-                                    //     remote_receiver.clone(),
-                                    //     remote_sender.clone(),
-                                    //     &term,
-                                    //     &mut master,
-                                    //     &mut key_interceptor,
-                                    // ).await;
-
-                                    // let should_install = match should_install {
-                                    //     Some(val) => val,
-                                    //     None => {
-                                    //         prompt_remote_integration_install(
-                                    //             remote_host,
-                                    //             console_term.clone(),
-                                    //             console_term_key_tx.clone(),
-                                    //             &mut terminal,
-                                    //             input_rx.clone(),
-                                    //         ).await.unwrap_or(false)
-                                    //     }
-                                    // };
-
-                                    // if should_install {
-                                    //     let installation_command = "curl -fSsL https://fig.io/install-minimal.sh | bash; exec $SHELL\n";
-                                    //     master.write_all(installation_command.as_bytes()).await?;
-                                    // }
-                                }
                             }
                         }
                         Err(err) => warn!("Failed to recv: {err}"),
@@ -726,31 +600,6 @@ fn figterm_main(command: Option<&[String]>) -> Result<()> {
                                         let preexec = term.shell_state().preexec;
 
                                         debug!(?event, ?raw, %preexec,  "Got key event");
-
-                                        if !preexec && ai_enabled && event.key == KeyCode::Enter && event.modifiers == input::Modifiers::NONE {
-                                            if let Some(TextBuffer { buffer, cursor_idx }) = term.get_current_buffer() {
-                                                let buffer = buffer.trim();
-                                                if buffer.len() > 1 && buffer.starts_with('#') && term.columns() > buffer.len() {
-                                                    write_buffer.extend(
-                                                        &std::iter::repeat_n(b'\x08', buffer.len()
-                                                            .max(cursor_idx.unwrap_or(0)))
-                                                            .collect::<Vec<_>>()
-                                                    );
-                                                    write_buffer.extend(
-                                                        format!(
-                                                            "{} translate '{}'\r",
-                                                            CLI_BINARY_NAME,
-                                                            buffer
-                                                                .trim_start_matches('#')
-                                                                .trim()
-                                                                .replace('\'', "'\"'\"'")
-                                                            ).as_bytes()
-                                                    );
-                                                    master.write_all(&write_buffer).await?;
-                                                    continue 'select_loop;
-                                                }
-                                            }
-                                        }
 
                                         // if we are in CSI u mode we try to encode first, otherwise we try to send the raw bytes first
                                         let raw = if csi_u_set {
@@ -897,7 +746,6 @@ fn figterm_main(command: Option<&[String]>) -> Result<()> {
                             trace!("Received message from socket: {message:?}");
                             process_remote_message(
                                 message,
-                                main_loop_tx.clone(),
                                 remote_sender.clone(),
                                 &term,
                                 &mut master,
@@ -916,13 +764,10 @@ fn figterm_main(command: Option<&[String]>) -> Result<()> {
                             debug!("Received message from figterm listener: {message:?}");
                             process_figterm_message(
                                 message,
-                                main_loop_tx.clone(),
                                 sender.clone(),
                                 &term,
-                                &history_sender,
                                 &mut master,
                                 &mut key_interceptor,
-                                &session_id,
                             ).await?;
                         }
                         Err(err) => {
@@ -955,7 +800,6 @@ fn figterm_main(command: Option<&[String]>) -> Result<()> {
         };
 
         let _ = stop_ipc_tx.send(());
-        fig_telemetry::finish_telemetry().await;
 
         result
     });
@@ -965,10 +809,6 @@ fn figterm_main(command: Option<&[String]>) -> Result<()> {
     // We must explicitly shutdown the runtime to exit.
     // This can cause resource leaks if we aren't careful about tasks we spawn.
     runtime.shutdown_background();
-
-    // attempt cleanup
-    #[cfg(target_os = "linux")]
-    cleanup::cleanup()?;
 
     runtime_result
 }
@@ -992,12 +832,10 @@ fn main() {
         Err(err) => {
             error!("Error in async runtime: {err}");
             println!("{PRODUCT_NAME} had an Error!: {err:?}");
-            // capture_anyhow(&err);
 
             // Fallback to normal shell
             #[cfg(unix)]
             if let Err(err) = launch_shell(command) {
-                // capture_anyhow(&err);
                 logger::stdio_debug_log(err.to_string());
             }
         },

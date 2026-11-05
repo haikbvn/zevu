@@ -19,7 +19,6 @@ use parking_lot::{
     RawFairMutex,
 };
 use serde::Serialize;
-use time::OffsetDateTime;
 use tokio::sync::{
     broadcast,
     oneshot,
@@ -31,25 +30,6 @@ use uuid::Uuid;
 pub struct EditBuffer {
     pub text: String,
     pub cursor: i64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct SessionMetrics {
-    pub start_time: OffsetDateTime,
-    pub end_time: OffsetDateTime,
-    pub num_insertions: i64,
-    pub num_popups: i64,
-}
-
-impl SessionMetrics {
-    pub fn new(start: OffsetDateTime) -> Self {
-        Self {
-            start_time: start,
-            end_time: start,
-            num_insertions: 0,
-            num_popups: 0,
-        }
-    }
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -193,7 +173,6 @@ pub struct FigtermSession {
     pub context: Option<ShellContext>,
     #[serde(skip)]
     pub terminal_cursor_coordinates: Option<TerminalCursorCoordinates>,
-    pub current_session_metrics: Option<SessionMetrics>,
     #[serde(skip)]
     pub response_map: HashMap<u64, oneshot::Sender<hostbound::response::Response>>,
     #[serde(skip)]

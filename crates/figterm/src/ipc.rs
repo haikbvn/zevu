@@ -237,10 +237,9 @@ pub async fn spawn_figterm_ipc(
     Ok(incoming_rx)
 }
 
-/// Connects to the desktop app and allows for a remote connection from remote hosts
+/// Connects the local PTY session to the desktop over its Unix socket.
 pub async fn spawn_remote_ipc(
     session_id: String,
-    parent_id: Option<String>,
     main_loop_sender: Sender<MainLoopEvent>,
 ) -> Result<(Sender<Hostbound>, Receiver<Clientbound>, oneshot::Sender<()>)> {
     let (stop_ipc_tx, mut stop_ipc_rx) = oneshot::channel::<()>();
@@ -272,7 +271,7 @@ pub async fn spawn_remote_ipc(
                     if let Err(err) = writer.send_message(Hostbound {
                         packet: Some(hostbound::Packet::Handshake(Handshake {
                             id: session_id.clone(),
-                            parent_id: parent_id.clone(),
+                            parent_id: None,
                             secret: secret.clone(),
                         })),
                     })
@@ -301,6 +300,7 @@ pub async fn spawn_remote_ipc(
                     // send outgoing messages
                     outgoing_rx.drain();
                     let outgoing_rx = outgoing_rx.clone();
+                    let incoming_main_loop_sender = main_loop_sender.clone();
                     let main_loop_sender = main_loop_sender.clone();
                     let outgoing_task = tokio::spawn(async move {
                         while let Ok(message) = outgoing_rx.recv_async().await {
@@ -350,6 +350,9 @@ pub async fn spawn_remote_ipc(
                                 break;
                             }
                         }
+                        // EOF means there is no desktop to handle intercepted keys.
+                        // Release them now, not after the next key triggers a failed write.
+                        incoming_main_loop_sender.send(MainLoopEvent::UnlockInterception).ok();
                         debug!("incoming_task exited");
                     });
 

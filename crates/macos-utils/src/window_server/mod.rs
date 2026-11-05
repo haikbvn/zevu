@@ -6,24 +6,13 @@ use std::boxed::Box;
 use std::ffi::c_void;
 use std::hash::Hash;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use accessibility_sys::{
-    AXError,
-    AXIsProcessTrusted,
-    AXObserverRef,
-    AXUIElementCreateApplication,
-    AXUIElementRef,
-    kAXApplicationActivatedNotification,
-    kAXApplicationShownNotification,
-    kAXFocusedWindowChangedNotification,
-    kAXMainWindowChangedNotification,
-    kAXUIElementDestroyedNotification,
-    kAXWindowCreatedNotification,
-    kAXWindowMovedNotification,
-    kAXWindowResizedNotification,
-    pid_t,
+    kAXApplicationActivatedNotification, kAXApplicationShownNotification, kAXFocusedUIElementChangedNotification, kAXFocusedWindowChangedNotification, kAXMainWindowChangedNotification, kAXUIElementDestroyedNotification, kAXWindowCreatedNotification, kAXWindowMovedNotification, kAXWindowResizedNotification, pid_t, AXIsProcessTrusted, AXObserverRef, AXUIElement, AXUIElementCreateApplication, AXUIElementRef
 };
 use ax_observer::AXObserver;
+use block2::RcBlock;
 use core_foundation::base::TCFType;
 use core_foundation::string::{
     CFString,
@@ -54,6 +43,7 @@ use objc2_app_kit::{
     NSWorkspaceDidTerminateApplicationNotification,
 };
 use objc2_foundation::{
+    NSOperationQueue,
     NSNotification,
     NSObject,
 };
@@ -80,6 +70,7 @@ const BLOCKED_BUNDLE_IDS: &[&str] = &[
     "com.apple.controlcenter",
     "com.mschrage.fig",
     "com.amazon.codewhisperer",
+    "dev.zevu.autocomplete",
 ];
 
 // TODO: -- should this use fig_util crate Terminal struct?
@@ -95,6 +86,7 @@ pub const XTERM_BUNDLE_IDS: &[&str] = &[
 const TRACKED_NOTIFICATIONS: &[&str] = &[
     kAXWindowCreatedNotification,
     kAXFocusedWindowChangedNotification,
+    kAXFocusedUIElementChangedNotification,
     kAXMainWindowChangedNotification,
     kAXApplicationShownNotification,
     kAXApplicationActivatedNotification,
@@ -110,6 +102,7 @@ pub struct ApplicationSpecifier {
 }
 
 pub enum WindowServerEvent {
+    ApplicationActivated,
     FocusChanged {
         window: UIElement,
         app: ApplicationSpecifier,
@@ -126,6 +119,7 @@ pub enum WindowServerEvent {
 pub struct AccessibilityCallbackData {
     pub app: ApplicationSpecifier,
     pub sender: Sender<WindowServerEvent>,
+    application: UIElement,
 }
 
 unsafe fn app_bundle_id(app: &NSRunningApplication) -> Option<String> {
@@ -142,7 +136,7 @@ unsafe impl Send for WindowServer {}
 unsafe impl Sync for WindowServer {}
 
 pub struct WindowServerInner {
-    observers: DashMap<ApplicationSpecifier, AXObserver<AccessibilityCallbackData>, fnv::FnvBuildHasher>,
+    observers: Arc<DashMap<ApplicationSpecifier, Arc<AXObserver<AccessibilityCallbackData>>, fnv::FnvBuildHasher>>,
     sender: Sender<WindowServerEvent>,
 }
 
@@ -295,6 +289,9 @@ impl WindowServerInner {
             info!("Cannot register to observer window events without accessibility perms");
             return;
         }
+        if from_activation && ns_app.isActive() {
+            self.sender.send(WindowServerEvent::ApplicationActivated).ok();
+        }
 
         let bundle_id = match app_bundle_id(ns_app) {
             Some(bundle_id) => bundle_id,
@@ -310,8 +307,6 @@ impl WindowServerInner {
             bundle_id: bundle_id.clone(),
         };
 
-        let ax_ref = AXUIElementCreateApplication(pid);
-
         for blocked_bundle in BLOCKED_BUNDLE_IDS {
             if *blocked_bundle == bundle_id {
                 debug!("Ignoring bundle id {:?}", bundle_id);
@@ -324,58 +319,71 @@ impl WindowServerInner {
             return;
         }
 
+        let application = UIElement::from(AXUIElement::wrap_under_create_rule(AXUIElementCreateApplication(pid)));
         if self.observers.contains_key(&key) {
-            debug!("app {} is already registered", key.bundle_id);
-            self.deregister(&key.bundle_id)
-        }
-
-        if from_activation {
-            // In Swift had 0.25s delay before this...?
-            let elem = UIElement::from(ax_ref);
-            let sender = self.sender.clone();
-            let app = key.clone();
-            tokio::spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-                if let Ok(window) = elem.focused_window() {
-                    if let Err(e) = sender.send(WindowServerEvent::FocusChanged { window, app }) {
-                        warn!("Error sending focus changed event: {e:?}");
-                    };
+            if from_activation {
+                if let Ok(window) = application.focused_window() {
+                    self.sender.send(WindowServerEvent::FocusChanged { window, app: key }).ok();
                 }
-            });
+            }
+            return;
         }
 
-        if XTERM_BUNDLE_IDS.contains(&key.bundle_id.as_str()) {
-            UIElement::from(ax_ref).enable_screen_reader_accessibility().ok();
-        }
-
-        let bundle_id = key.bundle_id.as_str();
-        if let Ok(mut observer) = AXObserver::create(
-            key.pid,
-            ax_ref,
+        // Keep callback queries on their short UI-thread timeout, independently of
+        // the cold-start connection made with the registration application's reference.
+        let callback_application =
+            UIElement::from(AXUIElement::wrap_under_create_rule(AXUIElementCreateApplication(pid)));
+        let observer = match AXObserver::create(
+            pid,
+            application,
             AccessibilityCallbackData {
                 app: key.clone(),
                 sender: self.sender.clone(),
+                application: callback_application,
             },
             application_ax_callback,
         ) {
-            let result: Result<Vec<_>, AXError> = TRACKED_NOTIFICATIONS
-                .iter()
-                .map(|notification| observer.subscribe(notification))
-                .collect();
-
-            if result.is_ok() {
-                debug!("Began tracking {bundle_id:?}");
-
-                self.observers.insert(key, observer);
+            Ok(observer) => Arc::new(observer),
+            Err(err) => {
+                warn!(?err, pid, %bundle_id, "Failed to create AX observer");
                 return;
+            },
+        };
+        self.observers.insert(key.clone(), observer.clone());
+        let observers = self.observers.clone();
+        let sender = self.sender.clone();
+        tokio::task::spawn_blocking(move || objc2::rc::autoreleasepool(|_| {
+            let result = observer.set_registration_timeout().and_then(|()| {
+                if XTERM_BUNDLE_IDS.contains(&key.bundle_id.as_str()) {
+                    observer.application.enable_screen_reader_accessibility().ok();
+                }
+                TRACKED_NOTIFICATIONS.iter().try_for_each(|notification| observer.subscribe(notification))
+            });
+            match result {
+                Ok(()) => {
+                    debug!(pid, %bundle_id, "Began tracking application");
+                    if from_activation {
+                        if let Ok(window) = observer.application.focused_window() {
+                            sender.send(WindowServerEvent::FocusChanged { window, app: key }).ok();
+                        }
+                    }
+                },
+                Err(err) => {
+                    warn!(?err, pid, %bundle_id, "Failed to register AX notifications");
+                    if let dashmap::mapref::entry::Entry::Occupied(entry) = observers.entry(key) {
+                        if Arc::ptr_eq(entry.get(), &observer) {
+                            entry.remove();
+                        }
+                    }
+                },
             }
-        }
 
-        warn!("Error setting up tracking for '{bundle_id:?}'");
-    }
-
-    fn deregister(&mut self, bundle_id: &str) {
-        self.observers.retain(|key, _| bundle_id != key.bundle_id);
+            // Native callbacks and their final observer release share the main runloop.
+            // Taking the owner in the operation also makes later block destruction inert.
+            let owner = std::cell::RefCell::new(Some((observer, observers)));
+            let release = RcBlock::new(move || drop(owner.take()));
+            NSOperationQueue::mainQueue().addOperationWithBlock(&release);
+        }));
     }
 
     fn register_all(&mut self) {
@@ -445,16 +453,10 @@ impl WindowServerHandler for WindowServerInner {
                 if let Some(bundle_id) = app_bundle_id(&ns_app) {
                     trace!("Terminated application - {bundle_id:?}");
 
-                    let apps = NSWorkspace::sharedWorkspace().runningApplications();
-
-                    let has_running = apps
-                        .iter()
-                        .any(|running| app_bundle_id(running).map(|id| id == bundle_id).unwrap_or(false));
-
-                    if !has_running {
-                        trace!("Deregistering app {bundle_id:?} since no other instances are running");
-                        self.deregister(bundle_id.as_str());
-                    }
+                    self.observers.remove(&ApplicationSpecifier {
+                        pid: ns_app.processIdentifier(),
+                        bundle_id,
+                    });
                 }
             }
         }
@@ -474,7 +476,7 @@ impl WindowServerHandler for WindowServerInner {
 #[unsafe(no_mangle)]
 unsafe extern "C" fn application_ax_callback(
     _observer: AXObserverRef,
-    element: AXUIElementRef,
+    _element: AXUIElementRef,
     notification_name: CFStringRef,
     refcon: *mut c_void,
 ) {
@@ -483,10 +485,10 @@ unsafe extern "C" fn application_ax_callback(
         return;
     }
 
-    let cb_data: &mut AccessibilityCallbackData = &mut *(refcon as *mut AccessibilityCallbackData);
-    // get_rule will call CFRetain to increment the RC in objc to make sure element is not freed
-    // before we are done with it. CFRelease is called automatically on drop.
-    let element = UIElement::from(element);
+    let data_ptr = refcon as *const AccessibilityCallbackData;
+    // Retain before any AX call can pump a nested main runloop and remove the observer.
+    Arc::increment_strong_count(data_ptr);
+    let cb_data = Arc::from_raw(data_ptr);
 
     let name = CFString::wrap_under_get_rule(notification_name);
     let app = &cb_data.app;
@@ -494,14 +496,22 @@ unsafe extern "C" fn application_ax_callback(
     let event_name = name.to_string();
 
     let event = match &*event_name {
-        kAXFocusedWindowChangedNotification | kAXMainWindowChangedNotification => {
-            Some(WindowServerEvent::FocusChanged {
-                window: element,
-                app: app.clone(),
-            })
-        },
-        kAXApplicationActivatedNotification | kAXApplicationShownNotification => {
-            element
+        kAXWindowCreatedNotification
+        | kAXFocusedWindowChangedNotification
+        | kAXFocusedUIElementChangedNotification
+        | kAXMainWindowChangedNotification
+        | kAXApplicationActivatedNotification
+        | kAXApplicationShownNotification => {
+            if !NSWorkspace::sharedWorkspace()
+                .frontmostApplication()
+                .is_some_and(|active| active.processIdentifier() == app.pid)
+            {
+                return;
+            }
+            // Notifications may identify the application or a newly created background window.
+            // Always resolve its actual focused window, including first-window creation.
+            cb_data
+                .application
                 .focused_window()
                 .ok()
                 .map(|window| WindowServerEvent::FocusChanged {
@@ -516,8 +526,7 @@ unsafe extern "C" fn application_ax_callback(
             // We check to see if there is a valid window for the app, if there is not then we know the final
             // window has been destroyed. This is done via getting an error when trying to get the focused
             // window.
-            let ax_app_ref = UIElement::from(AXUIElementCreateApplication(app.pid));
-            if ax_app_ref.focused_window().is_err() {
+            if cb_data.application.focused_window().is_err() {
                 Some(WindowServerEvent::WindowDestroyed { app: app.clone() })
             } else {
                 None

@@ -74,14 +74,13 @@ pub fn fix_permissions(env: &Env) -> Result<()> {
     }
 
     println!(
-        "\n{}\n\nIf you continue to experience issues:\n  1. Run {}\n  2. Report the issue with {}\n",
+        "\n{}\n\nIf you continue to experience issues, run {}.\n",
         if updated {
             "The permissions should be fixed now!".bold()
         } else {
             "The permissions have not been modified".bold()
         },
         format!("{CLI_BINARY_NAME} doctor").magenta(),
-        format!("{CLI_BINARY_NAME} issue").magenta(),
     );
 
     Ok(())

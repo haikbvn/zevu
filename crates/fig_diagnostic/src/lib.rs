@@ -6,7 +6,6 @@ use fig_os_shim::{
     Os,
     PlatformProvider,
 };
-use fig_telemetry::InstallMethod;
 use fig_util::consts::build::HASH;
 use fig_util::manifest::manifest;
 use fig_util::system_info::{
@@ -26,13 +25,6 @@ use sysinfo::{
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-fn serialize_display<D, S>(display: D, serializer: S) -> Result<S::Ok, S::Error>
-where
-    D: std::fmt::Display,
-    S: serde::Serializer,
-{
-    serializer.serialize_str(&display.to_string())
-}
 
 fn serialize_display_option<D, S>(display: &Option<D>, serializer: S) -> Result<S::Ok, S::Error>
 where
@@ -177,8 +169,6 @@ pub struct CurrentEnvironment {
     pub shell_version: Option<String>,
     #[serde(serialize_with = "serialize_display_option")]
     pub terminal: Option<Terminal>,
-    #[serde(serialize_with = "serialize_display")]
-    pub install_method: InstallMethod,
     #[serde(skip_serializing_if = "is_false")]
     pub in_cloudshell: bool,
     #[serde(skip_serializing_if = "is_false")]
@@ -221,7 +211,6 @@ impl CurrentEnvironment {
 
         let os = ctx.platform().os();
         let terminal = Terminal::parent_terminal(&ctx);
-        let install_method = fig_telemetry::get_install_method();
 
         let in_cloudshell = fig_util::system_info::in_cloudshell();
         let in_ssh = fig_util::system_info::in_ssh();
@@ -236,7 +225,6 @@ impl CurrentEnvironment {
             cli_path,
             os,
             terminal,
-            install_method,
             in_cloudshell,
             in_ssh,
             in_ci,
@@ -249,7 +237,7 @@ impl CurrentEnvironment {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Diagnostics {
-    #[serde(rename = "q-details")]
+    #[serde(rename = "zevu-details")]
     pub build_details: BuildDetails,
     pub system_info: SystemInfo,
     pub environment: CurrentEnvironment,
@@ -272,14 +260,3 @@ impl Diagnostics {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_diagnostics_user_readable() {
-        let diagnostics = Diagnostics::new().await;
-        let toml = diagnostics.user_readable().unwrap();
-        assert!(!toml.is_empty());
-    }
-}

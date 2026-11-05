@@ -3,10 +3,10 @@
 <idea-plugin>
 
   <!-- Unique id for this plugin. Must stay constant for the life of the plugin. -->
-  <id>com.amazon.codewhisperer.jetbrains</id>
+  <id>dev.zevu.jetbrains</id>
 
   <!-- Text to display as name on Preferences/Settings | Plugin page -->
-  <name>Amazon Q for command line</name>
+  <name>Zevu Terminal Companion</name>
 
   <!-- Product and plugin compatibility requirements -->
   <depends>org.jetbrains.plugins.terminal</depends>
@@ -14,22 +14,19 @@
   <!-- Text to display as description on Preferences/Settings | Plugin page -->
   <description>
     <![CDATA[
-      This is the Amazon Q for command line IDE extension. It only supports completions in your IDEs' terminal emulator. If you would like completions in your editor, please download the AWS Toolkit extension and set up Amazon Q
+      Zevu Terminal Companion connects your IDE's terminal emulator to Zevu for command-line completions. It does not provide completions in the editor.
     ]]>
   </description>
   <change-notes>
     <![CDATA[
       <ul>
-        <li>[1.0.4]: Update plugin for 2024.2</li>
-        <li>[1.0.3]: Fix rebranding</li>
-        <li>[1.0.2]: Rebrand to Amazon Q</li>
-        <li>[0.1.0]: Initial release</li>
+        <li>[0.2.0]: Zevu terminal integration with the bundled Zevu CLI.</li>
       </ul>
     ]]>
   </change-notes>
 
   <!-- Text to display as company information on Preferences/Settings | Plugin page -->
-  <vendor url="https://plugins.jetbrains.com">IntelliJ Platform SDK</vendor>
+  <vendor>Zevu</vendor>
 
   <projectListeners>
     <listener class="io.fig.jetbrains.FigWindowListener"

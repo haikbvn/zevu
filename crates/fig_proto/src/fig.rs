@@ -24,7 +24,6 @@ mod internal {
                 NotificationType::NotifyOnKeybindingPressed => "keybinding_pressed",
                 NotificationType::NotifyOnFocusChanged => "focus_change",
                 NotificationType::NotifyOnHistoryUpdated => "history_update",
-                NotificationType::NotifyOnApplicationUpdateAvailable => "application_update_available",
                 NotificationType::NotifyOnLocalStateChanged => "local_state_change",
                 NotificationType::NotifyOnEvent => "event",
                 NotificationType::NotifyOnAccessibilityChange => "accessibility_change",

@@ -1,112 +1,48 @@
 #!/usr/bin/env bash
-
-set -e
-
-OS="$(uname -s)"
-
-install_linux_deps() {
-  if [ -f /etc/debian_version ]; then
-    echo "Detected Debian/Ubuntu"
-    sudo apt update
-    sudo apt install build-essential pkg-config jq dpkg curl wget cmake clang libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev valac libibus-1.0-dev libglib2.0-dev sqlite3 libxdo-dev protobuf-compiler
-  elif [ -f /etc/arch-release ]; then
-    echo "Detected Arch"
-    sudo pacman -Syu --noconfirm
-    sudo pacman -S --noconfirm --needed webkit2gtk base-devel curl wget openssl appmenu-gtk-module gtk3 libappindicator-gtk3 librsvg libvips cmake jq pkgconf
-  elif [ -f /etc/fedora-release ]; then
-    echo "Detected Fedora"
-    sudo dnf check-update
-    sudo dnf install -y webkit2gtk3-devel.x86_64 openssl-devel curl wget libappindicator-gtk3 librsvg2-devel jq
-    sudo dnf group install -y "C Development Tools and Libraries"
-  else
-    echo "Unsupported Linux distribution. Check the docs for manual installation instructions."
-    exit 1
+# Local macOS dependency setup, build, verified installation and launch.
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+cd "$ROOT"
+[[ "$(uname -s)" == Darwin ]] || { echo 'Zevu setup supports macOS only.' >&2; exit 1; }
+xcrun --find clang >/dev/null || { echo 'Install Xcode Command Line Tools before running setup.' >&2; exit 1; }
+command -v brew >/dev/null || { echo 'Homebrew is required: https://brew.sh' >&2; exit 1; }
+export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_UPGRADE=1
+export HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1 HOMEBREW_NO_INSTALL_CLEANUP=1
+MACOS_MAJOR="$(sw_vers -productVersion)"
+MACOS_MAJOR="${MACOS_MAJOR%%.*}"
+if (( MACOS_MAJOR <= 14 )); then
+  bash scripts/setup-brew-bottles.sh
+fi
+for dependency in mise protobuf bash fish shellcheck jq cmake openjdk@17; do
+  brew list --versions "$dependency" >/dev/null 2>&1 || brew install "$dependency"
+done
+export PATH="$HOME/.cargo/bin:$(brew --prefix)/bin:$PATH"
+command -v rustup >/dev/null || { echo 'Install rustup without changing your default shell, then run setup again: https://rustup.rs' >&2; exit 1; }
+rustup toolchain install 1.87.0 --profile minimal --component rustfmt --component clippy
+mise trust .mise.toml
+mise install
+export JAVA_HOME="$(brew --prefix openjdk@17)/libexec/openjdk.jdk/Contents/Home"
+export MACOSX_DEPLOYMENT_TARGET=13.0
+mise exec -- corepack pnpm install --frozen-lockfile
+# Dependency-only mode is used to prepare the checkout before companion/core cutover.
+[[ "${ZEVU_DEPS_ONLY:-0}" != 1 ]] || exit 0
+mise exec -- bash scripts/build-macos.sh
+codesign --verify --deep --strict dist/Zevu.app
+# Staging and replacement stay on the /Applications volume; never expose a half-copy.
+STAGE="$(mktemp -d /Applications/.zevu-install.XXXXXX)"
+trap 'rm -rf "$STAGE"' EXIT
+ditto dist/Zevu.app "$STAGE/Zevu.app"
+codesign --verify --deep --strict "$STAGE/Zevu.app"
+if [[ -d /Applications/Zevu.app ]]; then
+  if [[ -x /Applications/Zevu.app/Contents/MacOS/zevu ]]; then
+    /Applications/Zevu.app/Contents/MacOS/zevu quit || true
   fi
-}
-
-install_macos_deps() {
-  echo "Detected macOS"
-  xcode-select --install || true
-  brew install mise pnpm protobuf zsh bash fish shellcheck jq
-}
-
-install_rust() {
-  echo "Installing Rust toolchain..."
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-    # Detect shell and source the correct env file
-
-  SHELL_NAME=$(basename "$SHELL")
-  case "$SHELL_NAME" in
-    fish)
-      source "$HOME/.cargo/env.fish"
-      ;;
-    nu)
-      source "$HOME/.cargo/env.nu"
-      ;;
-    *)
-      . "$HOME/.cargo/env"
-      ;;
-  esac
-
-  rustup default stable
-  rustup toolchain install nightly
-  cargo install typos-cli
-
-  if [[ "$OS" == "Darwin" ]]; then
-    rustup target add x86_64-apple-darwin
-    rustup target add aarch64-apple-darwin
-  fi
-}
-add_mise_to_shell() {
-  echo "Adding mise integration to shell..."
-
-  SHELL_NAME=$(basename "$SHELL")
-
-  case "$SHELL_NAME" in
-    zsh)
-      ZSHRC="${ZDOTDIR:-$HOME}/.zshrc"
-      grep -qxF 'eval "$(mise activate zsh)"' "$ZSHRC" || echo 'eval "$(mise activate zsh)"' >> "$ZSHRC"
-      ;;
-    bash)
-      BASHRC="$HOME/.bashrc"
-      grep -qxF 'eval "$(mise activate bash)"' "$BASHRC" || echo 'eval "$(mise activate bash)"' >> "$BASHRC"
-      ;;
-    fish)
-      FISH_CONFIG="$HOME/.config/fish/config.fish"
-      mkdir -p "$(dirname "$FISH_CONFIG")"
-      grep -qxF 'mise activate fish | source' "$FISH_CONFIG" || echo 'mise activate fish | source' >> "$FISH_CONFIG"
-      ;;
-    *)
-      echo "⚠️  Unknown shell '$SHELL_NAME'. Please add mise manually to your shell config."
-      ;;
-  esac
-}
-
-setup_mise() {
-  echo "Installing Python and Node with mise..."
-  add_mise_to_shell
-  mise trust
-  mise install
-}
-
-setup_precommit() {
-  echo "Installing pre-commit hooks..."
-  pnpm install --ignore-scripts
-}
-
-echo "Setting up project dependencies..."
-
-if [[ "$OS" == "Linux" ]]; then
-  install_linux_deps
-elif [[ "$OS" == "Darwin" ]]; then
-  install_macos_deps
-else
-  echo "Unsupported OS: $OS"
+  mv /Applications/Zevu.app "$STAGE/previous.app"
+fi
+if ! mv "$STAGE/Zevu.app" /Applications/Zevu.app; then
+  [[ ! -d "$STAGE/previous.app" ]] || mv "$STAGE/previous.app" /Applications/Zevu.app
   exit 1
 fi
-
-install_rust
-setup_mise
-setup_precommit
-
-echo "✅ Setup complete! Follow the instructions in the README to get started."
+/Applications/Zevu.app/Contents/MacOS/zevu setup --no-confirm
+/Applications/Zevu.app/Contents/MacOS/zevu launch
+printf 'Installed and launched /Applications/Zevu.app\n'

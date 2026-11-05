@@ -70,6 +70,7 @@ use objc::{
     sel,
     sel_impl,
 };
+use objc2_app_kit::NSWorkspace;
 use objc2_foundation::{
     NSDictionary,
     NSOperationQueue,
@@ -236,6 +237,9 @@ impl PlatformWindowImpl {
 
 impl PlatformStateImpl {
     pub(super) fn new(proxy: EventLoopProxy) -> Self {
+        if let Err(err) = fig_settings::state::set_value("desktop.inputMethodRequired", false) {
+            error!(%err, "Failed initializing the terminal input method requirement");
+        }
         let focused_window: Option<PlatformWindowImpl> = None;
         Self {
             proxy,
@@ -346,12 +350,13 @@ impl PlatformStateImpl {
                         let mut events: Vec<Event> = vec![];
 
                         match result {
-                            WindowServerEvent::FocusChanged { window, app } => {
+                            WindowServerEvent::ApplicationActivated => {
                                 events.push(Event::WindowEvent {
                                     window_id: AUTOCOMPLETE_ID,
-                                    window_event: WindowEvent::Hide,
+                                    window_event: WindowEvent::SetEnabled(false),
                                 });
-
+                            },
+                            WindowServerEvent::FocusChanged { window, app } => {
                                 if let Ok(window) = PlatformWindowImpl::new(app.bundle_id, app.pid, window) {
                                     events.push(Event::PlatformBoundEvent(
                                         PlatformBoundEvent::ExternalWindowFocusChanged { window },
@@ -483,7 +488,26 @@ impl PlatformStateImpl {
                 Ok(())
             },
             PlatformBoundEvent::ExternalWindowFocusChanged { window } => {
+                if !unsafe {
+                    NSWorkspace::sharedWorkspace()
+                        .frontmostApplication()
+                        .is_some_and(|app| app.processIdentifier() == window.pid)
+                } {
+                    return Ok(());
+                }
+                self.proxy.send_event(Event::WindowEvent {
+                    window_id: AUTOCOMPLETE_ID,
+                    window_event: WindowEvent::Hide,
+                })?;
                 let current_terminal = Terminal::from_bundle_id(window.bundle_id.clone());
+                if let Some(terminal) = current_terminal.as_ref() {
+                    if let Err(err) = fig_settings::state::set_value(
+                        "desktop.inputMethodRequired",
+                        terminal.supports_macos_input_method(),
+                    ) {
+                        error!(%err, "Failed recording the focused terminal's input method requirement");
+                    }
+                }
                 let level = window.get_level();
 
                 if level == Some(0) {
@@ -514,7 +538,6 @@ impl PlatformStateImpl {
                             && terminal_cursor_backing_installed
                             && !fig_settings::settings::get_bool_or("autocomplete.disable", false)
                             && accessibility_is_enabled();
-                        // && fig_request::fig_auth::is_logged_in();
 
                         enabled_proxy
                             .send_event(Event::WindowEvent {
@@ -599,19 +622,7 @@ impl PlatformStateImpl {
                 Ok(())
             },
             PlatformBoundEvent::AccessibilityUpdated { enabled } => {
-                let _was_enabled = ACCESSIBILITY_ENABLED.swap(enabled, Ordering::SeqCst);
-                // if enabled && !was_enabled {
-                //     tokio::runtime::Handle::current().spawn(async move {
-                //         fig_telemetry::emit_track(fig_telemetry::TrackEvent::new(
-                //             fig_telemetry::TrackEventType::GrantedAXPermission,
-                //             fig_telemetry::TrackSource::Desktop,
-                //             env!("CARGO_PKG_VERSION").into(),
-                //             std::iter::empty::<(&str, &str)>(),
-                //         ))
-                //         .await
-                //         .ok();
-                //     });
-                // }
+                ACCESSIBILITY_ENABLED.store(enabled, Ordering::SeqCst);
 
                 let proxy = self.proxy.clone();
                 let notifications_state = notifications_state.clone();
@@ -688,9 +699,9 @@ impl PlatformStateImpl {
         // .unwrap_or(false);
 
         if !is_xterm && supports_ime {
-            tracing::debug!("Sending notif com.amazon.codewhisperer.edit_buffer_updated");
+            tracing::debug!("Sending notif dev.zevu.autocomplete.edit_buffer_updated");
             NotificationCenter::distributed_center().post_notification(
-                ns_string!("com.amazon.codewhisperer.edit_buffer_updated"),
+                ns_string!("dev.zevu.autocomplete.edit_buffer_updated"),
                 &NSDictionary::new(),
             );
         } else {

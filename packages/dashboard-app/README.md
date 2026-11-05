@@ -1,13 +1,11 @@
 # Dashboard
 
-This folder holds the React single-page app for the Amazon Q desktop UI.
+This folder holds the React single-page app for the Zevu desktop UI. Its routes are getting started, autocomplete, keybindings, integrations, preferences, and licenses.
 
-<div align="center">
-  <img width="600" alt="Dashboard UI" src="https://github.com/user-attachments/assets/aaebc6ed-2048-41f9-a619-dabaedc55415" />
-</div>
+Setup reuses the local shell and Accessibility checks and requires the input method only for terminals that need it. Ready status requires successful current checks; the desktop independently validates prerequisites before persisting onboarding completion. Accounts, promotional feeds, telemetry, and update controls are not part of this app.
 
 ## Developing
 
-1. Run `pnpm build` in the project root.
-1. Run `npm run dev`.
-1. Start the main Amazon Q Desktop according to the instructions in the [Amazon Q Desktop README](../../crates/fig_desktop/README.md).
+1. Run `mise exec -- corepack pnpm build` in the project root.
+2. Run `mise exec -- corepack pnpm dev:dashboard` for frontend development.
+3. Use the local desktop API bridge when developing. The packaged dashboard is loaded from the app resources and does not require a development server.

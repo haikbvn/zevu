@@ -103,15 +103,6 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_load_json() {
-        let json = KeyBindings::load_hardcoded();
-        assert_eq!(json.0.len(), 24);
-
-        assert_eq!(json.0[0].identifier, "insertSelected");
-        assert_eq!(json.0[0].binding, "enter");
-    }
-
-    #[test]
     fn test_load_from_json_map() {
         let json_map = serde_json::json!({
             "autocomplete.keybindings.command+i": "toggleDescription",

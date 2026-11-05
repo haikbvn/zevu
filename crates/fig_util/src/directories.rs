@@ -16,15 +16,8 @@ use time::OffsetDateTime;
 
 #[cfg(unix)]
 use crate::RUNTIME_DIR_NAME;
-use crate::env_var::{
-    Q_BUNDLE_METADATA_PATH,
-    Q_PARENT,
-};
+use crate::env_var::Q_BUNDLE_METADATA_PATH;
 use crate::linux::PACKAGE_NAME;
-use crate::system_info::{
-    in_cloudshell,
-    is_remote,
-};
 use crate::{
     BACKUP_DIR_NAME,
     DATA_DIR_NAME,
@@ -66,8 +59,6 @@ pub enum DirectoryError {
     FromVecWithNul(#[from] std::ffi::FromVecWithNulError),
     #[error(transparent)]
     IntoString(#[from] std::ffi::IntoStringError),
-    #[error("{Q_PARENT} env variable not set")]
-    QParentNotSet,
     #[error("must be ran from an appimage executable")]
     NotAppImage,
 }
@@ -126,16 +117,6 @@ pub fn home_local_bin_ctx(ctx: &Context) -> Result<PathBuf> {
 /// - Windows: `{FOLDERID_RoamingAppData}`
 pub fn config_dir() -> Result<PathBuf> {
     dirs::config_dir().ok_or(DirectoryError::NoHomeDirectory)
-}
-
-/// The old codewhisperer data directory
-///
-/// This should be removed at some point in the future, once all our users have migrated
-/// - MacOS: `$HOME/Library/Application Support/codewhisperer`
-pub fn old_fig_data_dir() -> Result<PathBuf> {
-    Ok(dirs::data_local_dir()
-        .ok_or(DirectoryError::NoHomeDirectory)?
-        .join("codewhisperer"))
 }
 
 /// The q data directory
@@ -322,19 +303,6 @@ pub fn utc_backup_dir() -> Result<PathBuf> {
     Ok(backups_dir()?.join(now))
 }
 
-/// The directory to the directory containing config for the `/context` feature in `q chat`.
-pub fn chat_global_context_path<Ctx: FsProvider + EnvProvider>(ctx: &Ctx) -> Result<PathBuf> {
-    Ok(home_dir_ctx(ctx)?
-        .join(".aws")
-        .join("amazonq")
-        .join("global_context.json"))
-}
-
-/// The directory to the directory containing config for the `/context` feature in `q chat`.
-pub fn chat_profiles_dir<Ctx: FsProvider + EnvProvider>(ctx: &Ctx) -> Result<PathBuf> {
-    Ok(home_dir_ctx(ctx)?.join(".aws").join("amazonq").join("profiles"))
-}
-
 /// The desktop app socket path
 ///
 /// - MacOS: `$TMPDIR/cwrun/desktop.sock`
@@ -344,24 +312,9 @@ pub fn desktop_socket_path() -> Result<PathBuf> {
     Ok(host_sockets_dir()?.join("desktop.sock"))
 }
 
-/// The path to remote socket
-// - Linux/MacOS on ssh: At the value of `Q_PARENT`
-// - Linux/MacOS not on ssh:
-/// - MacOS: `$TMPDIR/cwrun/remote.sock`
-/// - Linux: `$XDG_RUNTIME_DIR/cwrun/remote.sock`
-/// - Windows: `%TEMP%\sockets\remote.sock`
+/// The local PTY transport socket, shared with the desktop listener.
 pub fn remote_socket_path() -> Result<PathBuf> {
-    // Normal implementation for non-test code
-    // TODO(grant): This is only enabled on Linux for now to prevent public dist
-    if is_remote() && !in_cloudshell() && cfg!(target_os = "linux") {
-        if let Some(parent_socket) = fig_os_shim::Env::new().get_os(Q_PARENT) {
-            Ok(PathBuf::from(parent_socket))
-        } else {
-            Err(DirectoryError::QParentNotSet)
-        }
-    } else {
-        local_remote_socket_path()
-    }
+    local_remote_socket_path()
 }
 
 /// The path to local remote socket
@@ -455,22 +408,6 @@ pub fn settings_path() -> Result<PathBuf> {
     Ok(fig_data_dir()?.join("settings.json"))
 }
 
-/// The path to the lock file used to indicate that the app is updating
-///
-/// - Linux: `$HOME/.local/share/{data_dir}/update.lock`
-/// - MacOS: `$HOME/Library/Application Support/{data_dir}/update.lock`
-/// - Windows: `%LOCALAPPDATA%\{data_dir}\update.lock`
-pub fn update_lock_path(ctx: &impl FsProvider) -> Result<PathBuf> {
-    Ok(fig_data_dir_ctx(ctx)?.join("update.lock"))
-}
-
-/// The path to the midway cookie
-///
-/// Path: `$HOME/.midway/cookie`
-pub fn midway_cookie_path() -> Result<PathBuf> {
-    Ok(home_dir()?.join(".midway").join("cookie"))
-}
-
 /// The path to the .zip bundle containing the GNOME Shell Extension identified by
 /// `extension_uuid`.
 pub fn bundled_gnome_extension_zip_path<Ctx: EnvProvider + PlatformProvider>(
@@ -545,223 +482,9 @@ utf8_dir!(backups_dir);
 utf8_dir!(logs_dir);
 utf8_dir!(settings_path);
 
-#[cfg(test)]
-mod linux_tests {
-    use super::*;
-
-    #[test]
-    fn all_paths() {
-        let ctx = Context::new();
-        assert!(home_dir().is_ok());
-        #[cfg(unix)]
-        assert!(home_local_bin().is_ok());
-        assert!(fig_data_dir().is_ok());
-        assert!(sockets_dir().is_ok());
-        assert!(remote_socket_path().is_ok());
-        assert!(local_remote_socket_path().is_ok());
-        assert!(figterm_socket_path("test").is_ok());
-        assert!(resources_path().is_ok());
-        assert!(manifest_path().is_ok());
-        assert!(backups_dir().is_ok());
-        assert!(logs_dir().is_ok());
-        assert!(settings_path().is_ok());
-        assert!(update_lock_path(&ctx).is_ok());
-        assert!(midway_cookie_path().is_ok());
-    }
-}
-
-// TODO(grant): Add back path tests on linux
 #[cfg(all(test, not(target_os = "linux")))]
 mod tests {
-    use insta;
-
     use super::*;
-
-    /// If this test fails then either of these paths were changed.
-    ///
-    /// Since we set the permissions of the parent of these paths, make sure they're in folders we
-    /// own otherwise we will set permissions of directories we shouldn't
-    #[test]
-    fn test_socket_paths() {
-        #[cfg(unix)]
-        assert_eq!(
-            host_sockets_dir().unwrap().file_name().unwrap().to_str().unwrap(),
-            format!("cwrun")
-        );
-
-        #[cfg(windows)]
-        assert_eq!(
-            host_sockets_dir().unwrap().file_name().unwrap().to_str().unwrap(),
-            format!("sockets")
-        );
-
-        #[cfg(unix)]
-        assert_eq!(
-            figterm_socket_path("").unwrap().parent().unwrap().file_name().unwrap(),
-            "t"
-        );
-
-        #[cfg(windows)]
-        assert_eq!(
-            figterm_socket_path("").unwrap().parent().unwrap().file_name().unwrap(),
-            "t"
-        );
-    }
-
-    macro_rules! assert_directory {
-        ($value:expr, @$snapshot:literal) => {
-            insta::assert_snapshot!(
-                sanitized_directory_path($value),
-                @$snapshot,
-            )
-        };
-    }
-
-    macro_rules! macos {
-        ($value:expr, @$snapshot:literal) => {
-            #[cfg(target_os = "macos")]
-            assert_directory!($value, @$snapshot)
-        };
-    }
-
-    macro_rules! linux {
-        ($value:expr, @$snapshot:literal) => {
-            #[cfg(target_os = "linux")]
-            assert_directory!($value, @$snapshot)
-        };
-    }
-
-    macro_rules! windows {
-        ($value:expr, @$snapshot:literal) => {
-            #[cfg(target_os = "windows")]
-            assert_directory!($value, @$snapshot)
-        };
-    }
-
-    fn sanitized_directory_path(path: Result<PathBuf>) -> String {
-        let mut path = path.unwrap().into_os_string().into_string().unwrap();
-
-        if let Ok(home) = std::env::var("HOME") {
-            let home = home.strip_suffix('/').unwrap_or(&home);
-            path = path.replace(home, "$HOME");
-        }
-
-        let user = whoami::username();
-        path = path.replace(&user, "$USER");
-
-        if let Ok(tmpdir) = std::env::var("TMPDIR") {
-            let tmpdir = tmpdir.strip_suffix('/').unwrap_or(&tmpdir);
-            path = path.replace(tmpdir, "$TMPDIR");
-        }
-
-        #[cfg(target_os = "macos")]
-        {
-            if let Ok(tmpdir) = macos_tempdir() {
-                let tmpdir = tmpdir.to_str().unwrap();
-                let tmpdir = tmpdir.strip_suffix('/').unwrap_or(tmpdir);
-                path = path.replace(tmpdir, "$TMPDIR");
-            };
-        }
-
-        if let Ok(xdg_runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
-            let xdg_runtime_dir = xdg_runtime_dir.strip_suffix('/').unwrap_or(&xdg_runtime_dir);
-            path = path.replace(xdg_runtime_dir, "$XDG_RUNTIME_DIR");
-        }
-
-        #[cfg(target_os = "linux")]
-        {
-            path = path.replace("/tmp", "$TMPDIR");
-        }
-
-        path
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn snapshot_home_local_bin() {
-        #[cfg(target_os = "linux")]
-        linux!(home_local_bin(), @"$HOME/.local/bin");
-        #[cfg(target_os = "macos")]
-        macos!(home_local_bin(), @"$HOME/.local/bin");
-    }
-
-    #[test]
-    fn snapshot_fig_data_dir() {
-        linux!(fig_data_dir(), @"$HOME/.local/share/amazon-q");
-        macos!(fig_data_dir(), @"$HOME/Library/Application Support/amazon-q");
-        windows!(fig_data_dir(), @r"C:\Users\$USER\AppData\Local\AmazonQ");
-    }
-
-    #[test]
-    fn snapshot_sockets_dir() {
-        linux!(sockets_dir(), @"$XDG_RUNTIME_DIR/cwrun");
-        macos!(sockets_dir(), @"$TMPDIR/cwrun");
-        windows!(sockets_dir(), @r"C:\Users\$USER\AppData\Local\Temp\AmazonQ\sockets");
-    }
-
-    #[test]
-    fn snapshot_themes_dir() {
-        linux!(themes_dir(&Context::new()), @"/usr/share/fig/themes");
-        macos!(themes_dir(&Context::new()), @"/Applications/Amazon Q.app/Contents/Resources/themes");
-        windows!(themes_dir(&Context::new()), @r"C:\Users\$USER\AppData\Local\AmazonQ\resources\themes");
-    }
-
-    #[test]
-    fn snapshot_backups_dir() {
-        linux!(backups_dir(), @"$HOME/.amazon-q.dotfiles.bak");
-        macos!(backups_dir(), @"$HOME/.amazon-q.dotfiles.bak");
-        windows!(backups_dir(), @r"C:\Users\$USER\.amazon-q.dotfiles.bak");
-    }
-
-    #[test]
-    fn snapshot_fig_socket_path() {
-        linux!(desktop_socket_path(), @"$XDG_RUNTIME_DIR/cwrun/desktop.sock");
-        macos!(desktop_socket_path(), @"$TMPDIR/cwrun/desktop.sock");
-        windows!(desktop_socket_path(), @r"C:\Users\$USER\AppData\Local\Temp\AmazonQ\sockets\desktop.sock");
-    }
-
-    #[test]
-    fn snapshot_remote_socket_path() {
-        linux!(remote_socket_path(), @"$XDG_RUNTIME_DIR/cwrun/remote.sock");
-        macos!(remote_socket_path(), @"$TMPDIR/cwrun/remote.sock");
-        windows!(remote_socket_path(), @r"C:\Users\$USER\AppData\Local\Temp\AmazonQ\sockets\remote.sock");
-    }
-
-    #[test]
-    fn snapshot_local_remote_socket_path() {
-        linux!(local_remote_socket_path(), @"$XDG_RUNTIME_DIR/cwrun/remote.sock");
-        macos!(local_remote_socket_path(), @"$TMPDIR/cwrun/remote.sock");
-        windows!(local_remote_socket_path(), @r"C:\Users\$USER\AppData\Local\Temp\AmazonQ\sockets\remote.sock");
-    }
-
-    #[test]
-    fn snapshot_figterm_socket_path() {
-        linux!(figterm_socket_path("$SESSION_ID"), @"$XDG_RUNTIME_DIR/cwrun/t/$SESSION_ID.sock");
-        macos!(figterm_socket_path("$SESSION_ID"), @"$TMPDIR/cwrun/t/$SESSION_ID.sock");
-        windows!(figterm_socket_path("$SESSION_ID"), @r"C:\Users\$USER\AppData\Local\Temp\AmazonQ\sockets\t\$SESSION_ID.sock");
-    }
-
-    #[test]
-    fn snapshot_settings_path() {
-        linux!(settings_path(), @"$HOME/.local/share/amazon-q/settings.json");
-        macos!(settings_path(), @"$HOME/Library/Application Support/amazon-q/settings.json");
-        windows!(settings_path(), @r"C:\Users\$USER\AppData\Local\AmazonQ\settings.json");
-    }
-
-    #[test]
-    fn snapshot_update_lock_path() {
-        let ctx = Context::new();
-        linux!(update_lock_path(&ctx), @"$HOME/.local/share/amazon-q/update.lock");
-        macos!(update_lock_path(&ctx), @"$HOME/Library/Application Support/amazon-q/update.lock");
-        windows!(update_lock_path(&ctx), @r"C:\Users\$USER\AppData\Local\AmazonQ\update.lock");
-    }
-
-    #[test]
-    fn snapshot_midway_cookie_path() {
-        linux!(midway_cookie_path(), @"$HOME/.midway/cookie");
-        macos!(midway_cookie_path(), @"$HOME/.midway/cookie");
-        windows!(midway_cookie_path(), @r"C:\Users\$USER\.midway\cookie");
-    }
 
     #[test]
     #[cfg(unix)]
@@ -784,10 +507,4 @@ mod tests {
         assert!(secure_socket_bytes <= MAX_SOCKET_LEN);
     }
 
-    #[test]
-    #[cfg(target_os = "macos")]
-    fn macos_tempdir_test() {
-        let tmpdir = macos_tempdir().unwrap();
-        println!("{:?}", tmpdir);
-    }
 }

@@ -1,13 +1,8 @@
-<p align="center">
-    <img width="300" src="https://github.com/withfig/fig/blob/main/static/FigBanner.png?raw=true"/>
-</p>
+# Zevu autocomplete
 
----
+This is the canonical autocomplete frontend. The desktop bundles its `dist/` resources; no development server is required at runtime. Suggestions retain upstream parsing, generator, insertion, appearance, and keybinding behavior without telemetry.
 
-# Autocomplete v9
-
-This is where all the changes to autocomplete are made. This readme will
-be updated for each version of autocomplete
+Built-in completion icons load from the bundled `spec://localhost/icons/` resources rather than the upstream icon CDN.
 
 ## Folders and Files
 
@@ -63,14 +58,8 @@ autocomplete spec format. For example, if we add “generators” as
 a property of args, this is a change. AND changes to the fig hooks that
 are sent
 
-## Testing locally
+## Developing locally
 
-You can launch the autocomplete engine locally by running:
-
-```bash
-npm run dev
-```
-
-which will start serving the repo with hot reloading on `localhost:3000`
-
-**Tip**: to view logs in the console when their source is displaying instrument.ts, right click anywhere it says "instrument.ts" and click "Blackbox Script" in the option menu
+From the project root, run `mise exec -- corepack pnpm dev:autocomplete`.
+Vite uses port 3124. Developer host overrides are optional and must be removed
+before using the packaged UI; they are not needed for the bundle.

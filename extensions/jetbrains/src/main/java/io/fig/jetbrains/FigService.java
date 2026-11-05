@@ -55,7 +55,7 @@ public class FigService implements ITerminalInstrumentation {
         switch (instrumentation) {
             case ADDED:
                 System.out.println("add " + id);
-                this.runCommand("q", "hook", "keyboard-focus-changed", "jedi " + id);
+                this.runCommand("/Applications/Zevu.app/Contents/MacOS/zevu", "hook", "keyboard-focus-changed", "jedi " + id);
                 this.terminals.put(id, new TerminalStatus(content, true, id));
 
                 JBTerminalWidget widget = TerminalView.getWidgetByContent(content);
@@ -74,7 +74,7 @@ public class FigService implements ITerminalInstrumentation {
 
             case FOCUSED:
                 System.out.println("focus " + id);
-                this.runCommand("q", "hook", "keyboard-focus-changed", "jedi " + id);
+                this.runCommand("/Applications/Zevu.app/Contents/MacOS/zevu", "hook", "keyboard-focus-changed", "jedi " + id);
                 this.setTerminalFocused(id, true);
                 break;
 
@@ -82,7 +82,7 @@ public class FigService implements ITerminalInstrumentation {
                 System.out.println("unfocus " + id);
                 this.setTerminalFocused(id, false);
 
-                this.runCommand("q", "hook", "keyboard-focus-changed", "jedi " + id);
+                this.runCommand("/Applications/Zevu.app/Contents/MacOS/zevu", "hook", "keyboard-focus-changed", "jedi " + id);
                 break;
 
             default:

@@ -263,7 +263,7 @@ impl std::default::Default for InputMethod {
         let fig_app_path = fig_util::app_bundle_path();
         let bundle_path = fig_app_path
             .join(BUNDLE_CONTENTS_HELPERS_PATH)
-            .join("CodeWhispererInputMethod.app");
+            .join("ZevuInputMethod.app");
         Self { bundle_path }
     }
 }
@@ -509,6 +509,11 @@ impl Integration for InputMethod {
     }
 
     async fn install(&self) -> Result<()> {
+        // A healthy registered helper must not invalidate already running terminals.
+        if self.is_installed().await.is_ok() {
+            return Ok(());
+        }
+
         {
             let destination = self.target_bundle_path()?;
 
@@ -730,7 +735,12 @@ where
 {
     cfg_if::cfg_if! {
         if #[cfg(feature = "dispatch")] {
-            dispatch::Queue::main().exec_sync(work)
+            let is_main: objc::runtime::BOOL = unsafe { msg_send![class!(NSThread), isMainThread] };
+            if is_main == objc::runtime::YES {
+                work()
+            } else {
+                dispatch::Queue::main().exec_sync(work)
+            }
         } else {
             work()
         }
@@ -742,9 +752,9 @@ mod tests {
     // Note this useful idiom: importing names from outer (for mod tests) scope.
     use super::*;
 
-    const TEST_INPUT_METHOD_BUNDLE_ID: &str = "com.amazon.inputmethod.codewhisperer";
+    const TEST_INPUT_METHOD_BUNDLE_ID: &str = "dev.zevu.inputmethod";
     const TEST_INPUT_METHOD_BUNDLE_URL: &str =
-        "/Applications/Amazon Q.app/Contents/Helpers/CodeWhispererInputMethod.app";
+        "/Applications/Zevu.app/Contents/Helpers/ZevuInputMethod.app";
 
     fn input_method() -> TISInputSource {
         let key: CFString = unsafe { CFString::wrap_under_create_rule(kTISPropertyBundleID) };

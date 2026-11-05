@@ -1,8 +1,14 @@
-# Amazon Q Desktop
+# Zevu Desktop
 
-This is the main Amazon Q Desktop written in Rust. It should be
-ready to run and start developing with if you follow the
-instructions in the [root README](../README.md).
+Zevu's desktop process hosts the upstream autocomplete popup and local dashboard.
+Autocomplete requires Accessibility permission and `autocomplete.disable = false`;
+terminal-specific cursor and integration eligibility remain upstream defaults.
+No account, updater, telemetry service, or remote catalogue is used.
+
+The local desktop and PTY sockets, process generators, settings/history APIs, detected
+IDE companions, and shell/input-method integrations remain part of the runtime.
+Onboarding completes only after the applicable local installation checks pass.
+See the [root README](../../README.md) for the macOS build and setup entrypoints.
 
 ## Developing
 

@@ -21,7 +21,6 @@ import {
 } from "@aws/amazon-q-developer-cli-api-bindings-wrappers";
 import { type Types } from "@aws/amazon-q-developer-cli-api-bindings";
 import { detailedDiff } from "deep-object-diff";
-import { trackEvent } from "../telemetry.js";
 import { FigState, initialFigState } from "../fig/hooks";
 import { AutocompleteState, NamedSetState, Visibility } from "./types";
 
@@ -231,9 +230,6 @@ const updateSuggestions =
         const suggestions = computeSuggestions(updatedState, settings);
         logger.info("Recomputed suggestions", { suggestions });
 
-        if (willBeVisible && !updatedState.figState.cwd) {
-          trackEvent("autocomplete-no-context", {});
-        }
 
         // If old state is visible, and user has changed the selected item try to
         // keep the same item selected.

@@ -26,8 +26,6 @@ use async_trait::async_trait;
 use checks::{
     BashVersionCheck,
     FishVersionCheck,
-    MidwayCheck,
-    SshdConfigCheck,
 };
 use clap::Args;
 use crossterm::style::Stylize;
@@ -52,7 +50,6 @@ use fig_integrations::shell::{
     ShellExt,
     ShellIntegration,
 };
-use fig_integrations::ssh::SshIntegration;
 use fig_integrations::{
     Error as InstallationError,
     Integration,
@@ -86,7 +83,6 @@ use fig_util::{
     APP_BUNDLE_NAME,
     CLI_BINARY_NAME,
     CLI_CRATE_NAME,
-    OLD_CLI_BINARY_NAMES,
     PRODUCT_NAME,
     PTY_BINARY_NAME,
     Shell,
@@ -378,15 +374,8 @@ trait DoctorCheck<T = ()>: Sync
 where
     T: Sync + Send + Sized,
 {
-    // Name should be _static_ across different user's devices. It is used to generate
-    // a unique id for the check used in analytics. If name cannot be unique for some reason, you
-    // should override analytics_event_name with the unique name to be sent for analytics.
     fn name(&self) -> Cow<'static, str>;
 
-    fn analytics_event_name(&self) -> String {
-        let name = self.name().to_ascii_lowercase();
-        Regex::new(r"[^a-zA-Z0-9]+").unwrap().replace_all(&name, "_").into()
-    }
 
     async fn get_type(&self, _: &T, _platform: Platform) -> DoctorCheckType {
         DoctorCheckType::NormalCheck
@@ -711,64 +700,6 @@ impl DoctorCheck for FigIntegrationsCheck {
     }
 }
 
-struct InlineCheck;
-
-#[async_trait]
-impl DoctorCheck for InlineCheck {
-    fn name(&self) -> Cow<'static, str> {
-        "Inline".into()
-    }
-
-    async fn get_type(&self, _: &(), _: Platform) -> DoctorCheckType {
-        let shell = get_shell_context().await;
-        let inline_enabled = fig_settings::settings::get_bool_or("inline.enabled", true);
-        let is_zsh = matches!(shell, Ok(Some(Shell::Zsh)));
-
-        if is_zsh && inline_enabled {
-            DoctorCheckType::NormalCheck
-        } else if !is_zsh {
-            DoctorCheckType::NoCheck
-        } else {
-            DoctorCheckType::SoftCheck
-        }
-    }
-
-    async fn check(&self, _: &()) -> Result<(), DoctorError> {
-        if !fig_settings::settings::get_bool_or("inline.enabled", true) {
-            return Err(DoctorError::Warning(
-                format!(
-                    "Inline is disabled, to re-enable run: {}",
-                    format!("{CLI_BINARY_NAME} inline enable").magenta()
-                )
-                .into(),
-            ));
-        }
-
-        if fig_os_shim::Env::new().q_using_zsh_autosuggestions() {
-            return Err(DoctorError::Error {
-                reason: "Using zsh-autosuggestions is not supported at the same time as Inline".into(),
-                info: vec![
-                    "To fix either:".into(),
-                    format!(
-                        "- Remove zsh-autosuggestions from {} and restart your terminal",
-                        "~/.zshrc".bold()
-                    )
-                    .into(),
-                    format!(
-                        "- Disable Inline by running: {}",
-                        format!("{CLI_BINARY_NAME} inline disable").magenta()
-                    )
-                    .into(),
-                ],
-                fix: None,
-                error: None,
-            });
-        }
-
-        Ok(())
-    }
-}
-
 struct PtySocketCheck;
 
 #[async_trait]
@@ -964,9 +895,6 @@ impl DoctorCheck<Option<Shell>> for DotfileCheck {
         format!("{shell} {path} integration check").into()
     }
 
-    fn analytics_event_name(&self) -> String {
-        format!("dotfile_check_{}", self.integration.file_name())
-    }
 
     async fn get_type(&self, current_shell: &Option<Shell>, _platform: Platform) -> DoctorCheckType {
         if let Some(shell) = current_shell {
@@ -1099,41 +1027,6 @@ impl DoctorCheck<DiagnosticsResponse> for ShellCompatibilityCheck {
     }
 }
 
-struct SshIntegrationCheck;
-
-#[async_trait]
-impl DoctorCheck<()> for SshIntegrationCheck {
-    fn name(&self) -> Cow<'static, str> {
-        "SSH integration".into()
-    }
-
-    async fn check(&self, _: &()) -> Result<(), DoctorError> {
-        match SshIntegration::new() {
-            Ok(integration) => match integration.is_installed().await {
-                Ok(()) => Ok(()),
-                Err(err) => Err(DoctorError::Error {
-                    reason: err.to_string().into(),
-                    info: vec![],
-                    fix: Some(DoctorFix::Async(
-                        async move {
-                            integration.install().await?;
-                            Ok(())
-                        }
-                        .boxed(),
-                    )),
-                    error: Some(eyre::Report::new(err)),
-                }),
-            },
-            Err(err) => Err(DoctorError::Error {
-                reason: err.to_string().into(),
-                info: vec![],
-                fix: None,
-                error: Some(eyre::Report::new(err)),
-            }),
-        }
-    }
-}
-
 struct BundlePathCheck;
 
 #[async_trait]
@@ -1235,15 +1128,6 @@ impl DoctorCheck<DiagnosticsResponse> for CliPathCheck {
     async fn check(&self, _: &DiagnosticsResponse) -> Result<(), DoctorError> {
         let path = std::env::current_exe().context("Could not get executable path.")?;
 
-        for old_bin in OLD_CLI_BINARY_NAMES {
-            if path.ends_with(old_bin) {
-                return Err(doctor_warning!(
-                    "The {} CLI has been replaced with {}",
-                    old_bin.magenta(),
-                    CLI_BINARY_NAME.magenta()
-                ));
-            }
-        }
 
         let local_bin_path = directories::home_dir()
             .unwrap()
@@ -1252,8 +1136,7 @@ impl DoctorCheck<DiagnosticsResponse> for CliPathCheck {
             .join(CLI_BINARY_NAME);
 
         if path == local_bin_path
-            || path == Path::new(system_paths::USR_LOCAL_BIN).join(CLI_BINARY_NAME)
-            || path == Path::new(system_paths::OPT_HOMEBREW_BIN).join(CLI_BINARY_NAME)
+            || path == fig_util::app_bundle_path().join("Contents/MacOS").join(CLI_BINARY_NAME)
         {
             Ok(())
         } else if path.ends_with(Path::new("target/debug").join(CLI_BINARY_NAME))
@@ -1659,6 +1542,58 @@ impl DoctorCheck<Option<Terminal>> for VSCodeIntegrationCheck {
 struct ImeStatusCheck;
 
 #[cfg(target_os = "macos")]
+fn terminal_application_in_ancestry<'a>(
+    terminal: &Terminal,
+    process: fig_os_shim::process_info::Pid,
+    applications: &'a [macos_utils::applications::MacOSApplication],
+) -> Option<&'a macos_utils::applications::MacOSApplication> {
+    let bundle_id = terminal.to_bundle_id()?;
+    std::iter::successors(Some(process), |pid| pid.parent().map(|parent| *parent)).find_map(|pid| {
+        applications.iter().find(|app| {
+            app.process_identifier as u32 == pid.as_u32()
+                && app.bundle_identifier.as_deref() == Some(bundle_id.as_ref())
+        })
+    })
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod terminal_instance_tests {
+    use super::*;
+    use fig_os_shim::process_info::{FakePid, Pid};
+    use macos_utils::applications::MacOSApplication;
+
+    #[test]
+    fn selects_ancestor_instance_not_another_app_with_the_same_bundle() {
+        let process = Pid::new_fake(FakePid {
+            pid: 100,
+            parent: Some(Box::new(Pid::new_fake(FakePid {
+                pid: 99,
+                parent: Some(Box::new(Pid::new_fake(FakePid { pid: 42, ..Default::default() }))),
+                ..Default::default()
+            }))),
+            ..Default::default()
+        });
+        let app = |pid, bundle: &str| MacOSApplication {
+            name: None,
+            bundle_identifier: Some(bundle.into()),
+            bundle_path: None,
+            process_identifier: pid,
+        };
+        let applications = [
+            app(7, "com.mitchellh.ghostty"),
+            app(42, "com.mitchellh.ghostty"),
+            app(99, "com.apple.Terminal"),
+        ];
+        assert_eq!(
+            terminal_application_in_ancestry(&Terminal::Ghostty, process.clone(), &applications)
+                .map(|app| app.process_identifier),
+            Some(42),
+        );
+        assert!(terminal_application_in_ancestry(&Terminal::Ghostty, process, &applications[..1]).is_none());
+    }
+}
+
+#[cfg(target_os = "macos")]
 #[async_trait]
 impl DoctorCheck<SupportedTerminalCheckContext> for ImeStatusCheck {
     fn name(&self) -> Cow<'static, str> {
@@ -1724,9 +1659,13 @@ impl DoctorCheck<SupportedTerminalCheckContext> for ImeStatusCheck {
 
         match &context.terminal {
             Some(terminal) if terminal.supports_macos_input_method() => {
-                let app = running_applications()
-                    .into_iter()
-                    .find(|app| app.bundle_identifier.as_deref() == terminal.to_bundle_id().as_deref());
+                let process_context = Context::new();
+                let applications = running_applications();
+                let app = terminal_application_in_ancestry(
+                    terminal,
+                    process_context.process_info().current_pid(),
+                    &applications,
+                );
 
                 if let Some(app) = app {
                     if !input_method.enabled_for_terminal_instance(terminal, app.process_identifier) {
@@ -1843,25 +1782,6 @@ impl DoctorCheck for WindowsConsoleCheck {
     }
 }
 
-struct LoginStatusCheck;
-
-#[async_trait]
-impl DoctorCheck for LoginStatusCheck {
-    fn name(&self) -> Cow<'static, str> {
-        "Auth".into()
-    }
-
-    async fn check(&self, _: &()) -> Result<(), DoctorError> {
-        if !fig_util::system_info::in_cloudshell() && !fig_auth::is_logged_in().await {
-            return Err(doctor_error!(
-                "Not authenticated. Please run {}",
-                format!("{CLI_BINARY_NAME} login").bold()
-            ));
-        }
-        Ok(())
-    }
-}
-
 struct DashboardHostCheck;
 
 #[async_trait]
@@ -1962,6 +1882,7 @@ where
             eyre::bail!(e);
         },
     };
+    let mut failed = false;
     for check in checks {
         let name = check.name();
         let check_type: DoctorCheckType = check.get_type(&context, Platform::current()).await;
@@ -1984,13 +1905,10 @@ where
         }
 
         if config.all {
+            failed |= matches!(result, Err(DoctorError::Error { .. }));
             continue;
         }
 
-        if result.is_err() {
-            let analytics_event_name = check.analytics_event_name();
-            fig_telemetry::send_doctor_check_failed(analytics_event_name).await;
-        }
 
         if let Err(DoctorError::Error { reason, fix, error, .. }) = result {
             if let Some(fixfn) = fix {
@@ -2028,6 +1946,7 @@ where
         println!();
     }
 
+    if failed { eyre::bail!("Local prerequisite checks failed"); }
     Ok(())
 }
 
@@ -2075,6 +1994,41 @@ struct CheckConfiguration {
     strict: bool,
 }
 
+struct BundleResourcesCheck;
+#[async_trait]
+impl DoctorCheck for BundleResourcesCheck {
+    fn name(&self) -> Cow<'static, str> { "Bundled executables and completion catalogue".into() }
+    async fn check(&self, _: &()) -> Result<(), DoctorError> {
+        let bundle = fig_util::app_bundle_path();
+        for name in [CLI_BINARY_NAME, PTY_BINARY_NAME, fig_util::APP_PROCESS_NAME] {
+            let path = bundle.join("Contents/MacOS").join(name);
+            let metadata = std::fs::metadata(&path).map_err(eyre::Report::from)?;
+            use std::os::unix::fs::PermissionsExt;
+            if !metadata.is_file() || metadata.permissions().mode() & 0o111 == 0 {
+                return Err(doctor_error!("Missing executable permission: {}", path.display()));
+            }
+        }
+        let contents = std::fs::read(bundle.join("Contents/Resources/specs/index.json")).map_err(eyre::Report::from)?;
+        let _: serde_json::Value = serde_json::from_slice(&contents).map_err(eyre::Report::from)?;
+        Ok(())
+    }
+}
+
+struct CompanionCheck;
+#[async_trait]
+impl DoctorCheck for CompanionCheck {
+    fn name(&self) -> Cow<'static, str> { "Detected IDE companions".into() }
+    async fn check(&self, _: &()) -> Result<(), DoctorError> {
+        for variant in fig_integrations::vscode::variants_installed() {
+            fig_integrations::vscode::VSCodeIntegration { variant }.is_installed().await.map_err(eyre::Report::from)?;
+        }
+        for integration in fig_integrations::intellij::variants_installed().await.map_err(eyre::Report::from)? {
+            integration.is_installed().await.map_err(eyre::Report::from)?;
+        }
+        Ok(())
+    }
+}
+
 // Doctor
 pub async fn doctor_cli(all: bool, strict: bool) -> Result<ExitCode> {
     #[cfg(unix)]
@@ -2106,33 +2060,17 @@ pub async fn doctor_cli(all: bool, strict: bool) -> Result<ExitCode> {
         })?;
     }
 
-    // Remove update lock on doctor runs to fix bad state if update crashed.
-    if let Ok(update_lock) = fig_util::directories::update_lock_path(&Context::new()) {
-        if update_lock.exists() {
-            std::fs::remove_file(update_lock).ok();
-        }
-    }
-
-    run_checks(
-        "Let's check if you're logged in...".into(),
-        vec![&LoginStatusCheck {}],
-        config,
-        &mut spinner,
-    )
-    .await?;
-
-    // If user is logged in, try to launch fig
     launch_fig_desktop(LaunchArgs {
         wait_for_socket: true,
         open_dashboard: false,
-        immediate_update: true,
         verbose: false,
     })
     .ok();
 
-    let shell_integrations: Vec<_> = [Shell::Bash, Shell::Zsh, Shell::Fish]
-        .into_iter()
-        .map(|shell| shell.get_shell_integrations(&Env::new()))
+    let env = Env::new();
+    let shell_integrations: Vec<_> = Shell::all().iter()
+        .filter(|shell| fig_integrations::shell::shell_executable(**shell, &env).is_some())
+        .map(|shell| shell.get_shell_integrations(&env))
         .collect::<Result<Vec<_>, fig_integrations::Error>>()?
         .into_iter()
         .flatten()
@@ -2156,14 +2094,14 @@ pub async fn doctor_cli(all: bool, strict: bool) -> Result<ExitCode> {
             format!("Let's make sure {PRODUCT_NAME} is set up correctly..."),
             vec![
                 &FigBinCheck,
+                &BundleResourcesCheck,
+                &CompanionCheck,
                 #[cfg(unix)]
                 &LocalBinPathCheck,
                 #[cfg(target_os = "windows")]
                 &WindowsConsoleCheck,
                 &SettingsCorruptionCheck,
-                &SshdConfigCheck,
                 &FigIntegrationsCheck,
-                // &SshIntegrationCheck,
             ],
             config,
             &mut spinner,
@@ -2189,8 +2127,6 @@ pub async fn doctor_cli(all: bool, strict: bool) -> Result<ExitCode> {
                 &PluginDevModeCheck,
                 &DashboardHostCheck,
                 &AutocompleteHostCheck,
-                &MidwayCheck,
-                &InlineCheck,
             ],
             config,
             &mut spinner,
@@ -2313,21 +2249,11 @@ pub async fn doctor_cli(all: bool, strict: bool) -> Result<ExitCode> {
         println!();
         println!("{} Doctor found errors. Please fix them and try again.", CROSS.red());
         println!();
-        println!(
-            "If you are not sure how to fix it, please open an issue with {} to let us know!",
-            format!("{CLI_BINARY_NAME} issue").magenta()
-        );
-        println!();
     } else {
         // If early exit is disabled, no errors are thrown
         if !config.all {
             println!("{} Everything looks good!", CHECKMARK.green());
         }
-        println!();
-        println!(
-            "  {PRODUCT_NAME} still not working? Run {} to let us know!",
-            format!("{CLI_BINARY_NAME} issue").magenta()
-        );
         println!();
     }
 
@@ -2341,5 +2267,5 @@ pub async fn doctor_cli(all: bool, strict: bool) -> Result<ExitCode> {
         fig_settings::state::set_value("doctor.prompt-restart-terminal", false)?;
     }
 
-    Ok(ExitCode::SUCCESS)
+    Ok(if is_error { ExitCode::FAILURE } else { ExitCode::SUCCESS })
 }

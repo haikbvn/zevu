@@ -13,7 +13,6 @@ use std::sync::{
     LazyLock,
     OnceLock,
 };
-use std::time::Duration;
 
 use cfg_if::cfg_if;
 use fig_desktop_api::init_script::javascript_init;
@@ -46,7 +45,6 @@ use tao::window::{
     WindowBuilder,
     WindowId as WryWindowId,
 };
-use tokio::time::MissedTickBehavior;
 use tracing::{
     debug,
     error,
@@ -79,7 +77,6 @@ use crate::platform::{
     PlatformBoundEvent,
     PlatformState,
 };
-use crate::protocol::spec::clear_index_cache;
 use crate::protocol::{
     api,
     icons,
@@ -91,8 +88,6 @@ use crate::request::api_request;
 use crate::tray::{
     self,
     build_tray,
-    get_context_menu,
-    get_icon,
 };
 use crate::webview::window_id::AutocompleteId;
 pub use crate::webview::window_id::{
@@ -104,7 +99,6 @@ use crate::{
     EventLoop,
     EventLoopProxy,
     InterceptState,
-    auth_watcher,
     file_watcher,
     local_ipc,
     utils,
@@ -113,9 +107,8 @@ use crate::{
 pub const DASHBOARD_SIZE: LogicalSize<f64> = LogicalSize::new(960.0, 720.0);
 pub const DASHBOARD_MINIMUM_SIZE: LogicalSize<f64> = LogicalSize::new(700.0, 480.0);
 
-pub const AUTOCOMPLETE_WINDOW_TITLE: &str = "Fig Autocomplete";
+pub const AUTOCOMPLETE_WINDOW_TITLE: &str = "Zevu Autocomplete";
 
-pub const LOGIN_PATH: &str = "/";
 
 fn map_theme(theme: &str) -> Option<WryTheme> {
     match theme {
@@ -361,7 +354,6 @@ impl WebviewManager {
         }
 
         file_watcher::setup_listeners(self.notifications_state.clone(), self.event_loop.create_proxy()).await;
-        auth_watcher::spawn_auth_watcher();
 
         init_webview_notification_listeners(self.event_loop.create_proxy()).await;
 
@@ -501,35 +493,10 @@ impl WebviewManager {
                         Event::ControlFlow(new_control_flow) => {
                             *control_flow = new_control_flow;
                         },
-                        Event::ReloadTray { is_logged_in } => {
-                            tray.set_icon(Some(get_icon(is_logged_in)))
-                                .map_err(|err| error!(?err))
-                                .ok();
-                            tray.set_icon_as_template(true);
-                            tray.set_menu(Some(Box::new(get_context_menu(is_logged_in))));
-                        },
-                        Event::ReloadCredentials => {
-                            // tray.set_menu(Some(Box::new(get_context_menu())));
-
-                            let autocomplete_enabled =
-                                !fig_settings::settings::get_bool_or("autocomplete.disable", false)
-                                    && PlatformState::accessibility_is_enabled().unwrap_or(true);
-                            // && fig_request::fig_auth::is_logged_in();
-
-                            proxy
-                                .send_event(Event::WindowEvent {
-                                    window_id: AUTOCOMPLETE_ID,
-                                    window_event: WindowEvent::SetEnabled(autocomplete_enabled),
-                                })
-                                .unwrap();
-                        },
                         Event::ReloadAccessibility => {
-                            // tray.set_menu(Some(Box::new(get_context_menu())));
-
                             let autocomplete_enabled =
                                 !fig_settings::settings::get_bool_or("autocomplete.disable", false)
                                     && PlatformState::accessibility_is_enabled().unwrap_or(true);
-                            // && fig_request::fig_auth::is_logged_in();
 
                             proxy
                                 .send_event(Event::WindowEvent {
@@ -693,7 +660,7 @@ pub fn build_dashboard(
     let mut url = dashboard::url();
 
     if show_onboarding {
-        url.set_path(LOGIN_PATH);
+        url.set_path("/");
     } else if let Some(page) = page {
         url.set_path(&page);
     }
@@ -881,6 +848,14 @@ async fn init_webview_notification_listeners(proxy: EventLoopProxy) {
             }
         };};
     }
+    watcher!(
+        settings,
+        "autocomplete.disable",
+        |_notification: JsonNotification, proxy: &EventLoopProxy| {
+            proxy.send_event(Event::ReloadAccessibility).ok();
+        }
+    );
+
 
     #[cfg(target_os = "linux")]
     {
@@ -894,21 +869,6 @@ async fn init_webview_notification_listeners(proxy: EventLoopProxy) {
             State,
         };
 
-        use crate::notification_bus::JsonNotification;
-        watcher!(
-            settings,
-            "autocomplete.disable",
-            |notification: JsonNotification, proxy: &EventLoopProxy| {
-                let enabled = !notification.as_bool().unwrap_or(false);
-                debug!(%enabled, "Autocomplete");
-                proxy
-                    .send_event(Event::WindowEvent {
-                        window_id: AUTOCOMPLETE_ID,
-                        window_event: WindowEvent::SetEnabled(enabled),
-                    })
-                    .unwrap();
-            }
-        );
         watcher!(
             settings,
             "app.launchOnStartup",
@@ -1031,77 +991,4 @@ async fn init_webview_notification_listeners(proxy: EventLoopProxy) {
         }
     );
 
-    // I don't think this is meant to be here anymore
-    // watcher!(settings, "app.beta", |_: JsonNotification, proxy: &EventLoopProxy| {
-    //     let proxy = proxy.clone();
-    //     tokio::spawn(fig_install::update(
-    //         Some(Box::new(move |_| {
-    //             proxy
-    //                 .send_event(Event::ShowMessageNotification {
-    //                     title: "Fig Update".into(),
-    //                     body: "Fig is updating in the background. You can continue to use Fig while
-    // it updates.".into(),                     parent: None,
-    //                 })
-    //                 .unwrap();
-    //         })),
-    //         fig_install::UpdateOptions {
-    //             ignore_rollout: true,
-    //             interactive: true,
-    //             relaunch_dashboard: true,
-    //         },
-    //     ));
-    // });
-
-    // Midway watcher
-    tokio::spawn(async move {
-        let mut res = NOTIFICATION_BUS.subscribe_midway();
-
-        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
-
-        // debounce thread
-        tokio::spawn(async move {
-            let mut should_send = false;
-            let mut interval = tokio::time::interval(Duration::from_millis(500));
-            interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-
-            loop {
-                tokio::select! {
-                    _ = rx.recv() => {
-                        should_send = true;
-                        interval.reset();
-                    }
-                    _ = interval.tick() => {
-                        if should_send {
-                            info!("clearing autocomplete cache");
-                            let _ = proxy.send_event(
-                                Event::WindowEvent {
-                                    window_id: AUTOCOMPLETE_ID,
-                                    window_event: WindowEvent::Event {
-                                        event_name: "clear-cache".into(),
-                                        payload: None
-                                    }
-                                }
-                            );
-                            clear_index_cache().await;
-                            should_send = false;
-                        }
-                    }
-                }
-            }
-        });
-
-        loop {
-            match res.recv().await {
-                Ok(()) => {
-                    if let Err(err) = tx.send(()).await {
-                        error!("Error sending notification: {err}");
-                    }
-                },
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                    warn!("Notification bus 'midway' lagged by {n} messages");
-                },
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-            }
-        }
-    });
 }
