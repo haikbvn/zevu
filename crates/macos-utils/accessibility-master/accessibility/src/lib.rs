@@ -8,9 +8,15 @@ pub mod attribute;
 pub mod ui_element;
 pub mod util;
 
-use std::cell::{Cell, RefCell};
+use std::cell::{
+    Cell,
+    RefCell,
+};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{
+    Duration,
+    Instant,
+};
 
 use accessibility_sys::AXError;
 pub use action::*;

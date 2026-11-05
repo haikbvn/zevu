@@ -70,7 +70,7 @@ const base64abc = [
   "n",
   "o",
   "p",
-  "tcomp",
+  "q",
   "r",
   "s",
   "t",

@@ -15,7 +15,7 @@ pub fn url() -> Url {
             Ok(url) => return url,
             Err(err) => {
                 error!(%err, "Failed to parse developer.autocomplete.host");
-            }
+            },
         }
     };
 

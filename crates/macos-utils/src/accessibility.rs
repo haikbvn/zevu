@@ -1,7 +1,10 @@
 use accessibility_sys::AXIsProcessTrusted;
 use objc2::ClassType;
 use objc2_app_kit::NSWorkspace;
-use objc2_foundation::{NSURL, ns_string};
+use objc2_foundation::{
+    NSURL,
+    ns_string,
+};
 
 static ACCESSIBILITY_SETTINGS_URL: &str =
     "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";

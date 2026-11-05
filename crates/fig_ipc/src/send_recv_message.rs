@@ -2,11 +2,22 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use fig_proto::prost::Message;
-use fig_proto::{FigProtobufEncodable, ReflectMessage};
-use tokio::io::{AsyncRead, AsyncWrite};
+use fig_proto::{
+    FigProtobufEncodable,
+    ReflectMessage,
+};
+use tokio::io::{
+    AsyncRead,
+    AsyncWrite,
+};
 use tracing::error;
 
-use crate::{BufferedReader, Error, RecvMessage, SendMessage};
+use crate::{
+    BufferedReader,
+    Error,
+    RecvMessage,
+    SendMessage,
+};
 
 #[async_trait]
 pub trait SendRecvMessage: SendMessage + RecvMessage {
@@ -45,7 +56,7 @@ pub trait SendRecvMessage: SendMessage + RecvMessage {
             Err(_) => {
                 error!("Timeout while receiving response from message");
                 return Err(Error::Timeout);
-            }
+            },
         })
     }
 
@@ -66,7 +77,7 @@ pub trait SendRecvMessage: SendMessage + RecvMessage {
                 Err(_) => {
                     error!("Timeout while receiving response from message");
                     return Err(Error::Timeout);
-                }
+                },
             },
         )
     }

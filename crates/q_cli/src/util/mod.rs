@@ -1,15 +1,23 @@
 mod cli_context;
 pub mod desktop;
 pub mod pid_file;
-
 pub mod spinner;
 
 use std::env;
 use std::ffi::OsStr;
 use std::fmt::Display;
-use std::io::{ErrorKind, stdout};
-use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
+use std::io::{
+    ErrorKind,
+    stdout,
+};
+use std::path::{
+    Path,
+    PathBuf,
+};
+use std::process::{
+    Command,
+    ExitCode,
+};
 use std::time::Duration;
 
 use anstream::println;
@@ -20,13 +28,24 @@ use crossterm::style::Stylize;
 use desktop::desktop_app_running;
 use dialoguer::Select;
 use dialoguer::theme::ColorfulTheme;
-use eyre::{Context, ContextCompat, Result, bail};
+use eyre::{
+    Context,
+    ContextCompat,
+    Result,
+    bail,
+};
 use fig_ipc::local::quit_command;
 use fig_util::consts::APP_BUNDLE_ID;
-use fig_util::{CLI_BINARY_NAME, PRODUCT_NAME};
-use globset::{Glob, GlobSet, GlobSetBuilder};
+use fig_util::{
+    CLI_BINARY_NAME,
+    PRODUCT_NAME,
+};
+use globset::{
+    Glob,
+    GlobSet,
+    GlobSetBuilder,
+};
 use regex::Regex;
-
 use tracing::warn;
 
 /// Glob patterns against full paths
@@ -163,8 +182,6 @@ pub async fn quit_fig(verbose: bool) -> Result<ExitCode> {
         }
     }
 
-    // telem_join.map(|f| async { f.await.ok() });
-
     Ok(ExitCode::SUCCESS)
 }
 
@@ -182,6 +199,7 @@ pub fn app_not_running_message() -> String {
         format!("{CLI_BINARY_NAME} launch").magenta()
     )
 }
+
 
 pub fn match_regex(regex: impl AsRef<str>, input: impl AsRef<str>) -> Option<String> {
     Some(
@@ -260,6 +278,7 @@ pub fn dialoguer_theme() -> ColorfulTheme {
     }
 }
 
+
 #[cfg(target_os = "macos")]
 pub async fn is_brew_reinstall() -> bool {
     let regex = regex::bytes::Regex::new(r"brew(\.\w+)?\s+(upgrade|reinstall|install)").unwrap();
@@ -310,7 +329,11 @@ mod tests {
     #[ignore]
     #[test]
     fn sysinfo_test() {
-        use sysinfo::{ProcessRefreshKind, RefreshKind, System};
+        use sysinfo::{
+            ProcessRefreshKind,
+            RefreshKind,
+            System,
+        };
 
         let app_process_name = OsString::from(APP_PROCESS_NAME);
         let system = System::new_with_specifics(RefreshKind::nothing().with_processes(ProcessRefreshKind::nothing()));

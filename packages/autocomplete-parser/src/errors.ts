@@ -7,7 +7,6 @@ export const WrongDiffVersionedSpecError = createErrorInstance(
 );
 export const DisabledSpecError = createErrorInstance("DisabledSpecError");
 export const LoadLocalSpecError = createErrorInstance("LoadLocalSpecError");
-export const SpecCDNError = createErrorInstance("SpecCDNError");
 
 // ParsingErrors
 export const ParsingHistoryError = createErrorInstance("ParsingHistoryError");

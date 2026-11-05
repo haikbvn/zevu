@@ -10,7 +10,7 @@ enum Version {
 
 /// Try to find the version of protoc installed on the system.
 fn protoc_version() -> Option<Version> {
-    let output = std::process::Command::new(std::env::var_os("PROTOC").unwrap_or_else(|| "protoc".into())).arg("--version").output().ok()?;
+    let output = std::process::Command::new("protoc").arg("--version").output().ok()?;
     let version = String::from_utf8(output.stdout).ok()?;
     eprintln!("protoc version: {version:?}");
 
@@ -72,14 +72,7 @@ fn download_protoc_unix(protoc_version: &str, tmp_folder: &tempfile::TempDir) {
         .arg(tmp_folder.path().join("protoc.zip"));
     assert!(download_command.spawn().unwrap().wait().unwrap().success());
 
-    let mut checksum_command = Command::new(if cfg!(target_os = "macos") {
-        "shasum"
-    } else {
-        "sha256sum"
-    });
-    if cfg!(target_os = "macos") {
-        checksum_command.args(["-a", "256"]);
-    }
+    let mut checksum_command = Command::new("sha256sum");
     checksum_command.arg(tmp_folder.path().join("protoc.zip"));
     let checksum_output = checksum_command.output().unwrap();
     let checksum_output = String::from_utf8(checksum_output.stdout).unwrap();

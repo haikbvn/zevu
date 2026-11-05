@@ -1,18 +1,32 @@
 use std::collections::HashMap;
 use std::io::ErrorKind;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 use std::str::FromStr;
 
 use async_trait::async_trait;
-use fig_os_shim::{EnvProvider, Fs, FsProvider};
-use fig_settings::{Settings, State};
+use fig_os_shim::{
+    EnvProvider,
+    Fs,
+    FsProvider,
+};
+use fig_settings::{
+    Settings,
+    State,
+};
 use fig_util::PRODUCT_NAME;
 use fig_util::consts::APP_PROCESS_NAME;
 use fig_util::consts::linux::DESKTOP_ENTRY_NAME;
 use fig_util::directories::home_dir_ctx;
 
 use crate::Integration;
-use crate::error::{Error, ErrorExt, Result};
+use crate::error::{
+    Error,
+    ErrorExt,
+    Result,
+};
 
 /// Path to the local [PRODUCT_NAME] desktop entry installed under `~/.local/share/applications`
 pub fn local_entry_path<Ctx: FsProvider + EnvProvider>(ctx: &Ctx) -> Result<PathBuf> {
@@ -96,12 +110,12 @@ where
                         .into(),
                     ));
                 }
-            }
+            },
             None => {
                 return Err(Error::ImproperInstallation(
                     format!("Field {} is missing", field).into(),
                 ));
-            }
+            },
         }
         Ok(())
     }
@@ -126,7 +140,7 @@ where
                 return Err(Error::Custom(
                     "entry, icon, and exec paths are required for installation".into(),
                 ));
-            }
+            },
         };
 
         let fs = self.ctx.fs();
@@ -179,7 +193,7 @@ where
             Ok(contents) => contents,
             Err(Error::Io(err)) if err.kind() == ErrorKind::NotFound => {
                 return Err(Error::FileDoesNotExist(to_entry_path.clone().into()));
-            }
+            },
             Err(err) => return Err(err),
         };
         let entry_contents = EntryContents::new(entry_contents);
@@ -259,7 +273,7 @@ impl EntryContents {
             None => {
                 self.lines.push(to_add);
                 self.fields.insert(key.to_string(), self.lines.len() - 1);
-            }
+            },
         }
     }
 }
@@ -369,7 +383,11 @@ pub fn should_install_autostart_entry<Ctx: EnvProvider>(env: &Ctx, settings: &Se
 
 #[cfg(test)]
 mod tests {
-    use fig_os_shim::{Context, ContextBuilder, Env};
+    use fig_os_shim::{
+        Context,
+        ContextBuilder,
+        Env,
+    };
 
     use super::*;
 

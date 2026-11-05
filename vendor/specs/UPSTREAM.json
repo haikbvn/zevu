@@ -1,5 +1,0 @@
-{
-  "repository": "https://github.com/withfig/autocomplete",
-  "commit": "aef52acff84c45edde61ae610cc2c964802b9a38",
-  "note": "Source is unmodified. Build omits AI generators and Q-specific specs."
-}

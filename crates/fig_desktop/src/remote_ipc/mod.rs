@@ -1,27 +1,46 @@
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::Result;
 use base64::prelude::*;
 use bytes::BytesMut;
 use fig_proto::fig::server_originated_message::Submessage as ServerOriginatedSubMessage;
 use fig_proto::fig::{
-    EditBufferChangedNotification, HistoryUpdatedNotification, KeybindingPressedNotification,
-    LocationChangedNotification, Notification, NotificationType, Process, ProcessChangedNotification,
-    ServerOriginatedMessage, ShellPromptReturnedNotification,
+    EditBufferChangedNotification,
+    HistoryUpdatedNotification,
+    KeybindingPressedNotification,
+    LocationChangedNotification,
+    Notification,
+    NotificationType,
+    Process,
+    ProcessChangedNotification,
+    ServerOriginatedMessage,
+    ShellPromptReturnedNotification,
 };
-use fig_proto::local::{EditBufferHook, InterceptedKeyHook, PostExecHook, PreExecHook, PromptHook};
+use fig_proto::local::{
+    EditBufferHook,
+    InterceptedKeyHook,
+    PostExecHook,
+    PreExecHook,
+    PromptHook,
+};
 use fig_proto::prost::Message;
 use fig_proto::remote::clientbound;
-use fig_remote_ipc::figterm::{FigtermState, SessionMetrics};
-use time::OffsetDateTime;
-use tracing::{debug, error};
+use fig_remote_ipc::figterm::FigtermState;
+use tracing::{
+    debug,
+    error,
+};
 use uuid::Uuid;
 
-use crate::event::{EmitEventName, Event, WindowEvent};
+use crate::event::{
+    EmitEventName, Event, WindowEvent
+};
 use crate::platform::PlatformBoundEvent;
 use crate::webview::notification::WebviewNotificationsState;
-use crate::{AUTOCOMPLETE_ID, EventLoopProxy};
+use crate::{
+    AUTOCOMPLETE_ID,
+    EventLoopProxy,
+};
 
 #[derive(Debug, Clone)]
 pub struct RemoteHook {
@@ -39,30 +58,13 @@ impl fig_remote_ipc::RemoteHookHandler for RemoteHook {
         session_id: Uuid,
         figterm_state: &Arc<FigtermState>,
     ) -> Result<Option<clientbound::response::Response>> {
-        let _old_metrics = figterm_state.with_update(session_id, |session| {
+        figterm_state.with_update(session_id, |session| {
             session.edit_buffer.text.clone_from(&hook.text);
             session.edit_buffer.cursor.clone_from(&hook.cursor);
             session
                 .terminal_cursor_coordinates
                 .clone_from(&hook.terminal_cursor_coordinates);
             session.context.clone_from(&hook.context);
-
-            let received_at = OffsetDateTime::now_local().unwrap_or_else(|_| OffsetDateTime::now_utc());
-            let current_session_expired = session
-                .current_session_metrics
-                .as_ref()
-                .is_some_and(|metrics| received_at > metrics.end_time + Duration::from_secs(5));
-
-            if current_session_expired {
-                let previous = session.current_session_metrics.clone();
-                session.current_session_metrics = Some(SessionMetrics::new(received_at));
-                previous
-            } else {
-                if let Some(ref mut metrics) = session.current_session_metrics {
-                    metrics.end_time = received_at;
-                }
-                None
-            }
         });
 
         let utf16_cursor_position = hook

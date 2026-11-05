@@ -1,15 +1,36 @@
-use std::fs::{File, OpenOptions};
-use std::io::{Error, ErrorKind, Seek, SeekFrom, Write};
+use std::fs::{
+    File,
+    OpenOptions,
+};
+use std::io::{
+    Error,
+    ErrorKind,
+    Seek,
+    SeekFrom,
+    Write,
+};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 
 use eyre::Result;
-use nix::fcntl::{Flock, FlockArg};
-use nix::sys::signal::{Signal, kill};
+use nix::fcntl::{
+    Flock,
+    FlockArg,
+};
+use nix::sys::signal::{
+    Signal,
+    kill,
+};
 use nix::unistd::Pid;
 use tokio::fs::read_to_string;
 use tokio::time::sleep;
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{
+    debug,
+    error,
+    info,
+    instrument,
+    warn,
+};
 
 /// A file-based process lock that ensures only one instance of a process is running.
 ///
@@ -54,10 +75,10 @@ impl PidLock {
                             } else {
                                 info!(%pid, "Successfully killed existing process");
                             }
-                        }
+                        },
                         Err(err) => {
                             warn!(%err, %content, "Failed to parse PID from lockfile");
-                        }
+                        },
                     },
                     Err(err) => warn!(%err, "Failed to read PID from lockfile"),
                 }
@@ -66,7 +87,7 @@ impl PidLock {
                     error!(%err, "Failed to acquire lock after handling existing process");
                     err
                 })?
-            }
+            },
         };
 
         // Write current PID
@@ -137,10 +158,10 @@ async fn kill_process(pid: i32) -> Result<()> {
                 sleep(std::time::Duration::from_millis(100)).await;
             }
             Ok(())
-        }
+        },
         Err(err) => {
             error!(%err, %pid, "Failed to send SIGINT");
             Err(Error::other(format!("Failed to terminate existing process: {err}")).into())
-        }
+        },
     }
 }

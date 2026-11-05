@@ -1,9 +1,6 @@
-#[cfg(target_os = "linux")]
-mod cleanup;
 pub mod cli;
 mod event_handler;
 pub mod history;
-
 pub mod input;
 pub mod interceptor;
 pub mod ipc;
@@ -14,50 +11,121 @@ pub mod term;
 
 use std::env;
 #[cfg(unix)]
-use std::ffi::{CString, OsStr};
-use std::sync::{LazyLock, Mutex, RwLock};
-use std::time::{Duration, SystemTime};
+use std::ffi::{
+    CString,
+    OsStr,
+};
+use std::sync::{
+    LazyLock,
+    Mutex,
+    RwLock,
+};
+use std::time::{
+    Duration,
+    SystemTime,
+};
 
 use alacritty_terminal::Term;
 use alacritty_terminal::ansi::Processor;
 use alacritty_terminal::event::EventListener;
-use alacritty_terminal::grid::Dimensions;
-use alacritty_terminal::term::{ShellState, SizeInfo, TextBuffer};
-use anyhow::{Context as _, Result, anyhow};
+use alacritty_terminal::term::{
+    ShellState,
+    SizeInfo,
+};
+use anyhow::{
+    Context as _,
+    Result,
+    anyhow,
+};
 use bytes::BytesMut;
 use cfg_if::cfg_if;
 use clap::Parser;
 use cli::Cli;
-use fig_log::{LogArgs, initialize_logging};
-use fig_os_shim::{Context, Env};
-use fig_proto::local::{self, EnvironmentVariable, TerminalCursorCoordinates};
+use fig_log::{
+    LogArgs,
+    initialize_logging,
+};
+use fig_os_shim::{
+    Context,
+    Env,
+};
+use fig_proto::local::{
+    self,
+    EnvironmentVariable,
+    TerminalCursorCoordinates,
+};
 use fig_proto::remote::Hostbound;
-use fig_proto::remote_hooks::{hook_to_message, new_edit_buffer_hook};
+use fig_proto::remote_hooks::{
+    hook_to_message,
+    new_edit_buffer_hook,
+};
 use fig_settings::state;
-use fig_util::consts::CLI_BINARY_NAME;
-use fig_util::env_var::{TCOMP_LOG_LEVEL, TCOMP_PTY_SESSION_ID, TCOMP_SHELL, TCOMP_TERM};
-use fig_util::process_info::{Pid, PidExt};
-use fig_util::{PRODUCT_NAME, PTY_BINARY_NAME, Terminal as FigTerminal, directories};
-use flume::{Receiver, Sender};
+use fig_util::env_var::{
+    Q_LOG_LEVEL,
+    Q_SHELL,
+    Q_TERM,
+    QTERM_SESSION_ID,
+};
+use fig_util::process_info::{
+    Pid,
+    PidExt,
+};
+use fig_util::{
+    PRODUCT_NAME,
+    PTY_BINARY_NAME,
+    Terminal as FigTerminal,
+    directories,
+};
+use flume::Sender;
 #[cfg(unix)]
 use nix::unistd::execvp;
 use portable_pty::PtySize;
-use tokio::io::{self, AsyncWriteExt};
+use tokio::io::{
+    self,
+    AsyncWriteExt,
+};
 use tokio::sync::oneshot;
-use tokio::{runtime, select};
-use tracing::{debug, error, info, trace, warn};
+use tokio::{
+    runtime,
+    select,
+};
+use tracing::{
+    debug,
+    error,
+    info,
+    trace,
+    warn,
+};
 
 use crate::event_handler::EventHandler;
-use crate::input::{InputEvent, KeyCode, KeyCodeEncodeModes, KeyboardEncoding, Modifiers};
+use crate::input::{
+    InputEvent,
+    KeyCode,
+    KeyCodeEncodeModes,
+    KeyboardEncoding,
+    Modifiers,
+};
 use crate::interceptor::KeyInterceptor;
-use crate::ipc::{spawn_figterm_ipc, spawn_remote_ipc};
-use crate::message::{process_figterm_message, process_remote_message};
+use crate::ipc::{
+    spawn_figterm_ipc,
+    spawn_remote_ipc,
+};
+use crate::message::{
+    process_figterm_message,
+    process_remote_message,
+};
 #[cfg(unix)]
 use crate::pty::unix::open_pty;
 #[cfg(windows)]
 use crate::pty::win::open_pty;
-use crate::pty::{AsyncMasterPtyExt, CommandBuilder};
-use crate::term::{SystemTerminal, Terminal};
+use crate::pty::{
+    AsyncMasterPtyExt,
+    CommandBuilder,
+};
+use crate::term::{
+    SystemTerminal,
+    Terminal,
+};
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -89,10 +157,6 @@ pub enum MainLoopEvent {
     },
     UnlockInterception,
     SetImmediateMode(bool),
-    PromptSSH {
-        uuid: String,
-        remote_host: String,
-    },
     SetCsiU,
     UnsetCsiU,
 }
@@ -151,74 +215,6 @@ fn get_cursor_coordinates(terminal: &dyn Terminal) -> Option<TerminalCursorCoord
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn _should_install_remote_ssh_integration(
-    uuid: String,
-    remote_host: String,
-    main_loop_tx: Sender<MainLoopEvent>,
-    remote_receiver: Receiver<fig_proto::remote::Clientbound>,
-    remote_sender: Sender<Hostbound>,
-    term: &Term<EventHandler>,
-    pty_master: &mut Box<dyn crate::pty::AsyncMasterPty + Send + Sync>,
-    key_interceptor: &mut KeyInterceptor,
-) -> Option<bool> {
-    use fig_proto::remote::clientbound;
-
-    let remote_install_setting = fig_settings::settings::get_string_or("ssh.remote-prompt", "ask".into());
-    if remote_install_setting == "never" {
-        return Some(false);
-    }
-
-    let key = format!("ssh.remote-prompt.disable-host.{remote_host}");
-    let disable_host = fig_settings::state::get_bool_or(key, false);
-    if disable_host {
-        return Some(false);
-    }
-
-    let prompt_timeout: u64 = fig_settings::settings::get_int_or("ssh.remote-prompt.timeout", 2000)
-        .try_into()
-        .unwrap_or(2000);
-
-    // Wait for child ssh session to connect to local desktop instance.
-    let got_child_connection = tokio::time::timeout(tokio::time::Duration::from_millis(prompt_timeout), async {
-        loop {
-            if let Ok(msg) = remote_receiver.recv_async().await {
-                if let Some(clientbound::Packet::NotifyChildSessionStarted(clientbound::NotifyChildSessionStarted {
-                    parent_id,
-                })) = msg.packet
-                {
-                    if parent_id == uuid {
-                        return true;
-                    }
-                } else {
-                    process_remote_message(
-                        msg,
-                        main_loop_tx.clone(),
-                        remote_sender.clone(),
-                        term,
-                        pty_master,
-                        key_interceptor,
-                    )
-                    .await
-                    .ok();
-                }
-            }
-        }
-    })
-    .await
-    .is_ok();
-
-    if got_child_connection {
-        return Some(false);
-    }
-
-    if remote_install_setting == "always" {
-        return Some(true);
-    }
-
-    None
-}
-
 fn can_send_edit_buffer<T>(term: &Term<T>) -> bool
 where
     T: EventListener,
@@ -257,7 +253,7 @@ where
             } else {
                 true
             }
-        }
+        },
         None => false,
     };
     drop(handle);
@@ -267,10 +263,10 @@ where
     shell_enabled && !insertion_locked && !preexec
 }
 
-const TCOMP_DISABLE_AUTOCOMPLETE: &str = "TCOMP_DISABLE_AUTOCOMPLETE";
+const Q_DISABLE_AUTOCOMPLETE: &str = "Q_DISABLE_AUTOCOMPLETE";
 
 fn autocomplete_enabled(env: &Env) -> bool {
-    env.get_os(TCOMP_DISABLE_AUTOCOMPLETE).is_none_or(|s| s.is_empty())
+    env.get_os(Q_DISABLE_AUTOCOMPLETE).is_none_or(|s| s.is_empty())
 }
 
 static AUTOCOMPLETE_ENABLED: LazyLock<bool> = LazyLock::new(|| autocomplete_enabled(&Env::new()));
@@ -305,19 +301,19 @@ where
                 sender.send_async(message).await?;
             }
             Ok(())
-        }
+        },
         None => Err(anyhow!("No edit buffer to send")),
     }
 }
 
 fn get_parent_shell() -> Result<String> {
-    match env::var(TCOMP_SHELL).ok().filter(|s| !s.is_empty()) {
+    match env::var(Q_SHELL).ok().filter(|s| !s.is_empty()) {
         Some(v) => Ok(v),
         None => match env::var("SHELL").ok().filter(|s| !s.is_empty()) {
             Some(shell) => Ok(shell),
             None => {
-                anyhow::bail!("No TCOMP_SHELL or SHELL found");
-            }
+                anyhow::bail!("No Q_SHELL or SHELL found");
+            },
         },
     }
 }
@@ -332,38 +328,38 @@ fn build_shell_command(command: Option<&[String]>) -> Result<CommandBuilder> {
                 builder.arg(arg);
             }
             builder
-        }
+        },
         None => {
             let parent_shell = get_parent_shell()?;
             let mut builder = CommandBuilder::new(parent_shell);
 
-            if env::var("TCOMP_IS_LOGIN_SHELL").ok().as_deref() == Some("1") {
+            if env::var("Q_IS_LOGIN_SHELL").ok().as_deref() == Some("1") {
                 builder.arg("--login");
             }
 
-            if let Some(execution_string) = env::var("TCOMP_EXECUTION_STRING").ok().filter(|s| !s.is_empty()) {
+            if let Some(execution_string) = env::var("Q_EXECUTION_STRING").ok().filter(|s| !s.is_empty()) {
                 builder.args(["-c", &execution_string]);
             }
 
-            if let Some(extra_args) = env::var("TCOMP_SHELL_EXTRA_ARGS").ok().filter(|s| !s.is_empty()) {
+            if let Some(extra_args) = env::var("Q_SHELL_EXTRA_ARGS").ok().filter(|s| !s.is_empty()) {
                 builder.args(extra_args.split_whitespace().filter(|arg| arg != &"--login"));
             }
 
             builder
-        }
+        },
     };
 
-    builder.env(TCOMP_TERM, env!("CARGO_PKG_VERSION"));
+    builder.env(Q_TERM, env!("CARGO_PKG_VERSION"));
     if env::var_os("TMUX").is_some() {
-        builder.env("TCOMP_TERM_TMUX", env!("CARGO_PKG_VERSION"));
+        builder.env("Q_TERM_TMUX", env!("CARGO_PKG_VERSION"));
     }
 
     // Clean up environment and launch shell.
-    builder.env_remove(TCOMP_SHELL);
-    builder.env_remove("TCOMP_IS_LOGIN_SHELL");
-    builder.env_remove("TCOMP_START_TEXT");
-    builder.env_remove("TCOMP_SHELL_EXTRA_ARGS");
-    builder.env_remove("TCOMP_EXECUTION_STRING");
+    builder.env_remove(Q_SHELL);
+    builder.env_remove("Q_IS_LOGIN_SHELL");
+    builder.env_remove("Q_START_TEXT");
+    builder.env_remove("Q_SHELL_EXTRA_ARGS");
+    builder.env_remove("Q_EXECUTION_STRING");
 
     if let Ok(dir) = std::env::current_dir() {
         builder.cwd(dir);
@@ -388,7 +384,7 @@ fn launch_shell(command: Option<&[String]>) -> Result<()> {
                 Some(value) => env::set_var(key, value),
                 None => {
                     env::remove_var(key);
-                }
+                },
             }
         }
     }
@@ -400,18 +396,11 @@ fn launch_shell(command: Option<&[String]>) -> Result<()> {
 fn figterm_main(command: Option<&[String]>) -> Result<()> {
     fig_settings::settings::init_global().ok();
 
-    let context = Context::new();
-
-    let session_id = match std::env::var("MOCK_TCOMP_PTY_SESSION_ID") {
-        Ok(id) => id,
-        Err(_) => uuid::Uuid::new_v4().simple().to_string(),
-    };
+    let session_id = uuid::Uuid::new_v4().simple().to_string();
 
     unsafe {
-        std::env::set_var(TCOMP_PTY_SESSION_ID, &session_id);
+        std::env::set_var(QTERM_SESSION_ID, &session_id);
     }
-
-    let parent_id = fig_os_shim::Env::new().q_parent().ok();
 
     let mut terminal = SystemTerminal::new_from_stdio()?;
     let screen_size = terminal.get_screen_size()?;
@@ -437,11 +426,10 @@ fn figterm_main(command: Option<&[String]>) -> Result<()> {
         Ok(logger_guard) => Some(logger_guard),
         Err(err) => {
             if !fig_settings::state::get_bool_or("pty.suppress_log_error", false) {
-                // let id = capture_anyhow(&err);
-                eprintln!("Fig failed to init logger: {err:?}");
+                eprintln!("{PRODUCT_NAME} failed to init logger: {err:?}");
             }
             None
-        }
+        },
     };
 
     logger::stdio_debug_log(format!("pty name: {pty_name}"));
@@ -475,8 +463,6 @@ fn figterm_main(command: Option<&[String]>) -> Result<()> {
         .build()?;
 
     let runtime_result = runtime.block_on(async {
-
-
         terminal.set_raw_mode()?;
 
         let (main_loop_tx, main_loop_rx) = flume::bounded::<MainLoopEvent>(16);
@@ -489,7 +475,6 @@ fn figterm_main(command: Option<&[String]>) -> Result<()> {
         // Spawn thread to handle remote ipc
         let (remote_sender, remote_receiver, stop_ipc_tx) = spawn_remote_ipc(
             session_id.clone(),
-            parent_id,
             main_loop_tx.clone()
         ).await?;
 
@@ -524,8 +509,6 @@ fn figterm_main(command: Option<&[String]>) -> Result<()> {
             newline_mode: false,
         };
 
-        let ai_enabled = fig_settings::settings::get_bool_or("ai.terminal-hash-sub", true);
-
         if let Ok(shell) = get_parent_shell() {
             let path = std::path::Path::new(&shell);
             let name = path.file_name().and_then(|name| name.to_str()).unwrap_or(shell.as_str());
@@ -540,7 +523,7 @@ fn figterm_main(command: Option<&[String]>) -> Result<()> {
         let result: Result<()> = 'select_loop: loop {
             if first_time && term.shell_state().has_seen_prompt {
                 trace!("Has seen prompt and first time");
-                let initial_command = env::var("TCOMP_START_TEXT").ok().filter(|s| !s.is_empty());
+                let initial_command = env::var("Q_START_TEXT").ok().filter(|s| !s.is_empty());
                 if let Some(mut initial_command) = initial_command {
                     debug!("Sending initial text: {initial_command}");
                     initial_command.push('\n');
@@ -572,7 +555,7 @@ fn figterm_main(command: Option<&[String]>) -> Result<()> {
                                     }
 
                                     if execute {
-                                        master.write_all(b"\r").await?;
+                                        master.write_all(b"\r").await?; 
                                     }
 
                                     if unlock {
@@ -599,36 +582,6 @@ fn figterm_main(command: Option<&[String]>) -> Result<()> {
                                     stdout.flush().await?;
                                     csi_u_set = false;
                                 },
-                                MainLoopEvent::PromptSSH { uuid: _, remote_host: _ } => {
-                                    // let should_install = should_install_remote_ssh_integration(
-                                    //     uuid,
-                                    //     remote_host.clone(),
-                                    //     main_loop_tx.clone(),
-                                    //     remote_receiver.clone(),
-                                    //     remote_sender.clone(),
-                                    //     &term,
-                                    //     &mut master,
-                                    //     &mut key_interceptor,
-                                    // ).await;
-
-                                    // let should_install = match should_install {
-                                    //     Some(val) => val,
-                                    //     None => {
-                                    //         prompt_remote_integration_install(
-                                    //             remote_host,
-                                    //             console_term.clone(),
-                                    //             console_term_key_tx.clone(),
-                                    //             &mut terminal,
-                                    //             input_rx.clone(),
-                                    //         ).await.unwrap_or(false)
-                                    //     }
-                                    // };
-
-                                    // if should_install {
-                                    //     let installation_command = "curl -fSsL https://fig.io/install-minimal.sh | bash; exec $SHELL\n";
-                                    //     master.write_all(installation_command.as_bytes()).await?;
-                                    // }
-                                }
                             }
                         }
                         Err(err) => warn!("Failed to recv: {err}"),
@@ -647,31 +600,6 @@ fn figterm_main(command: Option<&[String]>) -> Result<()> {
                                         let preexec = term.shell_state().preexec;
 
                                         debug!(?event, ?raw, %preexec,  "Got key event");
-
-                                        if !preexec && ai_enabled && event.key == KeyCode::Enter && event.modifiers == input::Modifiers::NONE {
-                                            if let Some(TextBuffer { buffer, cursor_idx }) = term.get_current_buffer() {
-                                                let buffer = buffer.trim();
-                                                if buffer.len() > 1 && buffer.starts_with('#') && term.columns() > buffer.len() {
-                                                    write_buffer.extend(
-                                                        &std::iter::repeat_n(b'\x08', buffer.len()
-                                                            .max(cursor_idx.unwrap_or(0)))
-                                                            .collect::<Vec<_>>()
-                                                    );
-                                                    write_buffer.extend(
-                                                        format!(
-                                                            "{} translate '{}'\r",
-                                                            CLI_BINARY_NAME,
-                                                            buffer
-                                                                .trim_start_matches('#')
-                                                                .trim()
-                                                                .replace('\'', "'\"'\"'")
-                                                            ).as_bytes()
-                                                    );
-                                                    master.write_all(&write_buffer).await?;
-                                                    continue 'select_loop;
-                                                }
-                                            }
-                                        }
 
                                         // if we are in CSI u mode we try to encode first, otherwise we try to send the raw bytes first
                                         let raw = if csi_u_set {
@@ -818,7 +746,6 @@ fn figterm_main(command: Option<&[String]>) -> Result<()> {
                             trace!("Received message from socket: {message:?}");
                             process_remote_message(
                                 message,
-                                main_loop_tx.clone(),
                                 remote_sender.clone(),
                                 &term,
                                 &mut master,
@@ -837,13 +764,10 @@ fn figterm_main(command: Option<&[String]>) -> Result<()> {
                             debug!("Received message from figterm listener: {message:?}");
                             process_figterm_message(
                                 message,
-                                main_loop_tx.clone(),
                                 sender.clone(),
                                 &term,
-                                &history_sender,
                                 &mut master,
                                 &mut key_interceptor,
-                                &session_id,
                             ).await?;
                         }
                         Err(err) => {
@@ -877,7 +801,6 @@ fn figterm_main(command: Option<&[String]>) -> Result<()> {
 
         let _ = stop_ipc_tx.send(());
 
-
         result
     });
 
@@ -887,10 +810,6 @@ fn figterm_main(command: Option<&[String]>) -> Result<()> {
     // This can cause resource leaks if we aren't careful about tasks we spawn.
     runtime.shutdown_background();
 
-    // attempt cleanup
-    #[cfg(target_os = "linux")]
-    cleanup::cleanup()?;
-
     runtime_result
 }
 
@@ -898,7 +817,7 @@ fn main() {
     let cli = Cli::parse();
     let command = cli.command.as_deref();
 
-    logger::stdio_debug_log(format!("{TCOMP_LOG_LEVEL}={}", fig_log::get_log_level()));
+    logger::stdio_debug_log(format!("{Q_LOG_LEVEL}={}", fig_log::get_log_level()));
 
     if !state::get_bool_or("qterm.enabled", true) {
         println!("[NOTE] qterm is disabled. Autocomplete will not work.");
@@ -909,19 +828,17 @@ fn main() {
     match figterm_main(command) {
         Ok(()) => {
             info!("Exiting");
-        }
+        },
         Err(err) => {
             error!("Error in async runtime: {err}");
             println!("{PRODUCT_NAME} had an Error!: {err:?}");
-            // capture_anyhow(&err);
 
             // Fallback to normal shell
             #[cfg(unix)]
             if let Err(err) = launch_shell(command) {
-                // capture_anyhow(&err);
                 logger::stdio_debug_log(err.to_string());
             }
-        }
+        },
     }
 }
 
@@ -932,16 +849,13 @@ mod tests {
     #[test]
     fn autocomplete_enabled_test() {
         assert!(autocomplete_enabled(&Env::new_fake()));
-        assert!(autocomplete_enabled(&Env::from_slice(&[(
-            TCOMP_DISABLE_AUTOCOMPLETE,
-            ""
-        )])));
+        assert!(autocomplete_enabled(&Env::from_slice(&[(Q_DISABLE_AUTOCOMPLETE, "")])));
         assert!(!autocomplete_enabled(&Env::from_slice(&[(
-            TCOMP_DISABLE_AUTOCOMPLETE,
+            Q_DISABLE_AUTOCOMPLETE,
             "1"
         )])));
         assert!(!autocomplete_enabled(&Env::from_slice(&[(
-            TCOMP_DISABLE_AUTOCOMPLETE,
+            Q_DISABLE_AUTOCOMPLETE,
             "1"
         )])));
     }

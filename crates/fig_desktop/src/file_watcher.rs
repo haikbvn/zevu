@@ -1,12 +1,26 @@
 use std::sync::Arc;
 
 use fig_proto::fig::notification::Type as NotificationEnum;
-use fig_proto::fig::{NotificationType, SettingsChangedNotification};
+use fig_proto::fig::{
+    NotificationType,
+    SettingsChangedNotification,
+};
 use fig_settings::JsonStore;
 use fig_util::directories;
-use notify::{EventKind, RecursiveMode, Watcher};
-use serde_json::{Map, Value};
-use tracing::{debug, error, trace};
+use notify::{
+    EventKind,
+    RecursiveMode,
+    Watcher,
+};
+use serde_json::{
+    Map,
+    Value,
+};
+use tracing::{
+    debug,
+    error,
+    trace,
+};
 
 use crate::EventLoopProxy;
 use crate::notification_bus::NOTIFICATION_BUS;
@@ -20,7 +34,7 @@ pub async fn setup_listeners(notifications_state: Arc<WebviewNotificationsState>
             if let Err(err) = tx.send(event) {
                 error!(%err, "failed to send notify event");
             }
-        }
+        },
         Err(err) => error!(%err, "notify watcher"),
     })
     .unwrap();
@@ -31,21 +45,21 @@ pub async fn setup_listeners(notifications_state: Arc<WebviewNotificationsState>
                 Ok(()) => {
                     trace!("watching settings file at {settings_dir:?}");
                     Some(settings_path)
-                }
+                },
                 Err(err) => {
                     error!(%err, "failed to watch settings dir");
                     None
-                }
+                },
             },
             None => {
                 error!("failed to get settings file dir");
                 None
-            }
+            },
         },
         Err(err) => {
             error!(%err, "failed to get settings file path");
             None
-        }
+        },
     };
 
     tokio::spawn(async move {
@@ -56,7 +70,7 @@ pub async fn setup_listeners(notifications_state: Arc<WebviewNotificationsState>
             Err(err) => {
                 error!(?err, "failed to initialize settings");
                 Map::new()
-            }
+            },
         };
 
         #[cfg(target_os = "linux")]
@@ -87,6 +101,9 @@ pub async fn setup_listeners(notifications_state: Arc<WebviewNotificationsState>
                         match fig_settings::OldSettings::load_from_file() {
                             Ok(settings) => {
                                 debug!("Settings file changed");
+                                // CLI writes arrive through this watcher too; refresh the desktop cache
+                                // before listeners recompute autocomplete's enabled state.
+                                *fig_settings::OldSettings::data_lock().write() = Some(settings.clone());
 
                                 notifications_state
                                     .broadcast_notification_all(
@@ -121,12 +138,13 @@ pub async fn setup_listeners(notifications_state: Arc<WebviewNotificationsState>
                                 );
 
                                 prev_settings = settings;
-                            }
+                            },
                             Err(err) => error!(%err, "Failed to get settings"),
                         }
                     }
                 }
             }
+
         }
     });
 }

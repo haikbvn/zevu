@@ -8,7 +8,7 @@ import {
 } from "../ui/collapsible";
 import { Check, ChevronDown, X } from "lucide-react";
 import { Button } from "../ui/button";
-import { useSetting, useStatusCheck } from "@/hooks/store";
+import { useStatusCheck } from "@/hooks/store";
 
 export default function StatusCheck({
   check,
@@ -18,28 +18,10 @@ export default function StatusCheck({
   const [expanded, setExpanded] = useState(false);
   const [status, refreshStatus] = useStatusCheck(check.installKey);
   const [err, setErr] = useState("");
-  const [launchOnStartup] = useSetting("app.launchOnStartup");
 
   function fixInstall() {
     Install.install(check.installKey)
-      .then(() => {
-        // Default behavior for launchOnStartup should be true, hence check for undefined.
-        if (
-          check.installKey === "desktopEntry" &&
-          (launchOnStartup === undefined || launchOnStartup === true)
-        ) {
-          Install.install("autostartEntry")
-            .then(() => {
-              refreshStatus();
-            })
-            .catch((e) => {
-              console.error(e);
-              setErr(e.toString());
-            });
-        }
-
-        refreshStatus();
-      })
+      .then(() => refreshStatus())
       .catch((e) => {
         console.error(e);
         setErr(e.toString());
@@ -47,7 +29,7 @@ export default function StatusCheck({
   }
 
   useEffect(() => {
-    refreshStatus();
+    refreshStatus().catch((e) => setErr(String(e)));
   }, [refreshStatus]);
 
   return (

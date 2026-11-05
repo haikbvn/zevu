@@ -35,6 +35,7 @@ export const useParseArgumentsEffect = (
     (state) => state.setParserResult,
   );
   const command = useAutocompleteStore((state) => state.command);
+  const buffer = useAutocompleteStore((state) => state.figState.buffer);
   const onError = useAutocompleteStore((state) => state.error);
   const setVisibleState = useAutocompleteStore(
     (state) => state.setVisibleState,
@@ -42,6 +43,7 @@ export const useParseArgumentsEffect = (
   const context = useAutocompleteStore(shellContextSelector, shallow);
 
   const oldCommand = usePrevious(command);
+  const oldBuffer = usePrevious(buffer);
 
   useEffect(() => {
     let isMostRecentEffect = true;
@@ -57,12 +59,11 @@ export const useParseArgumentsEffect = (
         setLoading(false);
 
         const hasBackspacedToNewToken =
+          buffer !== oldBuffer &&
           tokens.length < oldTokens.length &&
           oldTokens[tokens.length - 1].text === tokens[tokens.length - 1].text;
 
-        const text = command?.originalTree.text ?? "";
-        const oldText = oldCommand?.originalTree.text ?? "";
-        const largeBufferChange = !isBufferDifferenceFromTyping(text, oldText);
+        const largeBufferChange = !isBufferDifferenceFromTyping(buffer, oldBuffer);
 
         setParserResult(result, hasBackspacedToNewToken, largeBufferChange);
       })
@@ -75,5 +76,5 @@ export const useParseArgumentsEffect = (
     return () => {
       isMostRecentEffect = false;
     };
-  }, [command, setParserResult, onError, context, setVisibleState]);
+  }, [command, buffer, setParserResult, onError, context, setVisibleState]);
 };

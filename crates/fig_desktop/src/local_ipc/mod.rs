@@ -3,24 +3,52 @@ mod hooks;
 
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
-
-use fig_ipc::{BufferedUnixStream, RecvMessage, SendMessage};
-use fig_os_shim::{Context as FigContext, ContextArcProvider, ContextProvider};
+use anyhow::{
+    Context,
+    Result,
+};
+use fig_ipc::{
+    BufferedUnixStream,
+    RecvMessage,
+    SendMessage,
+};
+use fig_os_shim::{
+    Context as FigContext,
+    ContextArcProvider,
+    ContextProvider,
+};
 use fig_proto::local::command_response::Response as CommandResponseTypes;
 use fig_proto::local::local_message::Type as LocalMessageType;
-use fig_proto::local::{CommandResponse, ErrorResponse, LocalMessage, SuccessResponse};
+use fig_proto::local::{
+    CommandResponse,
+    ErrorResponse,
+    LocalMessage,
+    SuccessResponse,
+};
 use fig_remote_ipc::figterm::FigtermState;
 use fig_settings::settings::SettingsProvider;
-use fig_settings::{Settings, State, StateProvider};
+use fig_settings::{
+    Settings,
+    State,
+    StateProvider,
+};
 use fig_util::directories;
 use tokio::net::UnixListener;
-use tracing::{debug, error, trace, warn};
+use tracing::{
+    debug,
+    error,
+    trace,
+    warn,
+};
 
 use crate::event::Event;
 use crate::platform::PlatformState;
 use crate::webview::notification::WebviewNotificationsState;
-use crate::{AUTOCOMPLETE_ID, DASHBOARD_ID, EventLoopProxy};
+use crate::{
+    AUTOCOMPLETE_ID,
+    DASHBOARD_ID,
+    EventLoopProxy,
+};
 
 pub enum LocalResponse {
     Error { code: Option<i32>, message: Option<String> },
@@ -135,10 +163,24 @@ async fn handle_local_ipc<Ctx>(
                     },
                     Some(command) => {
                         use fig_proto::local::command::Command::{
-                            BundleMetadata, ConnectToIbus, DebugMode, Devtools, Diagnostics, DumpState, InputMethod,
-                            ListTerminalIntegrations, LogLevel, Login, Logout, OpenBrowser, OpenUiElement,
-                            PromptAccessibility, Quit, ReportWindow, ResetCache, Restart, RestartSettingsListener,
-                            RunInstallScript, TerminalIntegration, Update,
+                            BundleMetadata,
+                            DebugMode,
+                            Devtools,
+                            Diagnostics,
+                            DumpState,
+                            InputMethod,
+                            ListTerminalIntegrations,
+                            LogLevel,
+                            OpenBrowser,
+                            OpenUiElement,
+                            PromptAccessibility,
+                            Quit,
+                            ReportWindow,
+                            ResetCache,
+                            Restart,
+                            RestartSettingsListener,
+                            RunInstallScript,
+                            TerminalIntegration,
                         };
 
                         match command {
@@ -149,23 +191,13 @@ async fn handle_local_ipc<Ctx>(
                             OpenBrowser(command) => commands::open_browser(command).await,
                             PromptAccessibility(_) => commands::prompt_for_accessibility_permission(&ctx).await,
                             LogLevel(command) => commands::log_level(command),
-                            InputMethod(command) => commands::input_method(command).await,
-                            Login(_) | Logout(_) => Err(LocalResponse::Error {
-                                code: None,
-                                message: Some("Termcomplete does not use accounts".into()),
-                            }),
                             DumpState(command) => commands::dump_state(
                                 command,
                                 &figterm_state,
                                 &webview_notifications_state,
                                 &platform_state,
                             ),
-                            ConnectToIbus(_) => commands::connect_to_ibus(proxy.clone(), &platform_state).await,
                             BundleMetadata(_) => commands::bundle_metadata(&ctx.context_arc()).await,
-                            Update(_) => Err(LocalResponse::Error {
-                                code: None,
-                                message: Some("Install updates manually".into()),
-                            }),
                             Devtools(command) => {
                                 let window_id = match command.window() {
                                     fig_proto::local::devtools_command::Window::DevtoolsAutocomplete => AUTOCOMPLETE_ID,
@@ -180,27 +212,28 @@ async fn handle_local_ipc<Ctx>(
                                     .ok();
 
                                 Ok(LocalResponse::Success(None))
-                            }
+                            },
                             TerminalIntegration(_)
                             | ListTerminalIntegrations(_)
                             | Restart(_)
                             | ReportWindow(_)
                             | RestartSettingsListener(_)
                             | RunInstallScript(_)
-                            | ResetCache(_) => {
+                            | ResetCache(_)
+                            | InputMethod(_) => {
                                 debug!(?command, "Unhandled command");
                                 Err(LocalResponse::Error {
                                     code: None,
                                     message: Some("Unknown command".to_owned()),
                                 })
-                            }
+                            },
                         }
                         .unwrap_or_else(|r| r)
-                    }
+                    },
                 };
 
                 match command.no_response {
-                    Some(true) => {}
+                    Some(true) => {},
                     _ => {
                         let message = {
                             CommandResponse {
@@ -212,7 +245,7 @@ async fn handle_local_ipc<Ctx>(
                                     } => CommandResponseTypes::Error(ErrorResponse { exit_code, message }),
                                     LocalResponse::Success(message) => {
                                         CommandResponseTypes::Success(SuccessResponse { message })
-                                    }
+                                    },
                                     LocalResponse::Message(m) => *m,
                                 }),
                             }
@@ -222,15 +255,29 @@ async fn handle_local_ipc<Ctx>(
                             error!(%err, "Failed sending local response");
                             break;
                         }
-                    }
+                    },
                 }
-            }
+            },
             Some(LocalMessageType::Hook(hook)) => {
                 use fig_proto::ReflectMessage;
                 use fig_proto::local::hook::Hook::{
-                    Callback, CaretPosition, ClearAutocompleteCache, EditBuffer, Event, FileChanged, FocusChange,
-                    FocusedWindowData, Hide, Init, IntegrationReady, InterceptedKey, KeyboardFocusChanged,
-                    OpenedSshConnection, PostExec, PreExec, Prompt, TmuxPaneChanged,
+                    Callback,
+                    CaretPosition,
+                    ClearAutocompleteCache,
+                    EditBuffer,
+                    Event,
+                    FileChanged,
+                    FocusChange,
+                    FocusedWindowData,
+                    Hide,
+                    Init,
+                    IntegrationReady,
+                    InterceptedKey,
+                    KeyboardFocusChanged,
+                    PostExec,
+                    PreExec,
+                    Prompt,
+                    TmuxPaneChanged,
                 };
 
                 if let Err(err) = match hook.hook {
@@ -239,7 +286,7 @@ async fn handle_local_ipc<Ctx>(
                     Some(FileChanged(request)) => hooks::file_changed(request).await,
                     Some(FocusedWindowData(request)) => {
                         hooks::focused_window_data(request, &platform_state, &proxy).await
-                    }
+                    },
                     Some(KeyboardFocusChanged(_)) => hooks::focus_change(&proxy).await,
                     Some(Event(event)) => hooks::event(event, &proxy).await,
                     Some(ClearAutocompleteCache(event)) => hooks::clear_autocomplete_cache(event, &proxy).await,
@@ -247,7 +294,6 @@ async fn handle_local_ipc<Ctx>(
                         Init(_)
                         | PostExec(_)
                         | TmuxPaneChanged(_)
-                        | OpenedSshConnection(_)
                         | Callback(_)
                         | IntegrationReady(_)
                         | Hide(_)
@@ -258,15 +304,15 @@ async fn handle_local_ipc<Ctx>(
                     ) => {
                         warn!("received legacy hook `{}`", hook.descriptor().name());
                         Ok(())
-                    }
+                    },
                     None => {
                         warn!("Received unknown or empty hook");
                         Ok(())
-                    }
+                    },
                 } {
                     error!("Error processing hook: {err:?}");
                 }
-            }
+            },
             None => warn!("Received empty local message"),
         }
     }

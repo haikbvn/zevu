@@ -6,12 +6,41 @@ use fig_proto::local::caret_position_hook::Origin;
 use fig_util::Terminal;
 use macos_utils::NotificationCenter;
 use objc2::mutability::InteriorMutable;
-use objc2::rc::{Allocated, Retained};
-use objc2::runtime::{AnyObject, Bool, Sel};
-use objc2::{ClassType, DeclaredClass, declare_class, msg_send, msg_send_id, sel};
-use objc2_foundation::{NSPoint, NSRange, NSRect, NSSize, NSString, ns_string};
-use objc2_input_method_kit::{IMKInputController, IMKServer};
-use tracing::{debug, info, trace, warn};
+use objc2::rc::{
+    Allocated,
+    Retained,
+};
+use objc2::runtime::{
+    AnyObject,
+    Bool,
+    Sel,
+};
+use objc2::{
+    ClassType,
+    DeclaredClass,
+    declare_class,
+    msg_send,
+    msg_send_id,
+    sel,
+};
+use objc2_foundation::{
+    NSPoint,
+    NSRange,
+    NSRect,
+    NSSize,
+    NSString,
+    ns_string,
+};
+use objc2_input_method_kit::{
+    IMKInputController,
+    IMKServer,
+};
+use tracing::{
+    debug,
+    info,
+    trace,
+    warn,
+};
 
 const INPUT_CONTROLLER_CLASS_NAME: &str = env!("InputMethodServerControllerClass");
 
@@ -50,7 +79,7 @@ declare_class!(
             let mut center = NotificationCenter::distributed_center();
             unsafe {
                 center.subscribe_with_observer(
-                    ns_string!("io.github.haikbvn.termcomplete.edit_buffer_updated"),
+                    ns_string!("dev.zevu.autocomplete.edit_buffer_updated"),
                     &this,
                     sel!(handleCursorPositionRequest:),
                 );
@@ -149,14 +178,11 @@ declare_class!(
     }
 );
 
-pub fn connect_imkserver(name: &NSString, identifier: Option<&NSString>) -> Option<Retained<IMKServer>> {
+pub fn connect_imkserver(name: &NSString, identifier: Option<&NSString>) {
     info!("connecting to imkserver");
     let server_alloc = IMKServer::alloc();
-    let server = unsafe { IMKServer::initWithName_bundleIdentifier(server_alloc, Some(name), identifier) };
-    if server.is_some() {
-        info!("connected to imkserver");
-    }
-    server
+    unsafe { IMKServer::initWithName_bundleIdentifier(server_alloc, Some(name), identifier) };
+    info!("connected to imkserver");
 }
 
 pub fn register_controller() {

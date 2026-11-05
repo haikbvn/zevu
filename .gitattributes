@@ -4,6 +4,3 @@ Cargo.lock text eol=lf
 .gitignore text eol=lf
 # Git LFS tracking for model files
 models/*.zip filter=lfs diff=lfs merge=lfs -text
-
-# Preserve the pinned completion catalog byte-for-byte, including upstream whitespace.
-vendor/specs/** -whitespace

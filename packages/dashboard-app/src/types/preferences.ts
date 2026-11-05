@@ -42,9 +42,7 @@ export type RichText = {
 export type InstallKey =
   | "dotfiles"
   | "accessibility"
-  | "inputMethod"
-  | "desktopEntry"
-  | "gnomeExtension";
+  | "inputMethod";
 
 export type InstallCheck = {
   id: string;
@@ -55,7 +53,6 @@ export type InstallCheck = {
   image?: string;
   action: string;
   actionWaitingText?: string;
-  skippable?: boolean;
   explainer?: {
     title: string;
     steps: RichText[][];

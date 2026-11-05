@@ -17,8 +17,6 @@ export interface Data {
   accessibilityIsInstalled: boolean | undefined;
   dotfilesIsInstalled: boolean | undefined;
   inputMethodIsInstalled: boolean | undefined;
-  desktopEntryIsInstalled: boolean | undefined;
-  gnomeExtensionIsInstalled: boolean | undefined;
 }
 
 export interface Actions {
@@ -28,8 +26,6 @@ export interface Actions {
   refreshAccessibilityIsInstalled: () => Promise<void>;
   refreshDotfilesIsInstalled: () => Promise<void>;
   refreshInputMethodIsInstalled: () => Promise<void>;
-  refreshDesktopEntryIsInstalled: () => Promise<void>;
-  refreshGnomeExtensionIsInstalled: () => Promise<void>;
 
   isLoading: () => boolean;
 }
@@ -45,8 +41,6 @@ export const createStore = () => {
     accessibilityIsInstalled: undefined,
     dotfilesIsInstalled: undefined,
     inputMethodIsInstalled: undefined,
-    desktopEntryIsInstalled: undefined,
-    gnomeExtensionIsInstalled: undefined,
     platformInfo: undefined,
     setSetting: async (key, value) => {
       set((s) => ({ settings: { ...s.settings, [key]: value } }));
@@ -69,26 +63,17 @@ export const createStore = () => {
       const inputMethodIsInstalled = await Install.isInstalled("inputMethod");
       set(() => ({ inputMethodIsInstalled }));
     },
-    refreshDesktopEntryIsInstalled: async () => {
-      const desktopEntryIsInstalled = await Install.isInstalled("desktopEntry");
-      set(() => ({ desktopEntryIsInstalled }));
-    },
-    refreshGnomeExtensionIsInstalled: async () => {
-      const gnomeExtensionIsInstalled =
-        await Install.isInstalled("gnomeExtension");
-      set(() => ({ gnomeExtensionIsInstalled }));
-    },
     refreshLocalState: async () => {
       const state = await ApiState.current();
       set(() => ({ state }));
     },
     isLoading: () => {
-      const { state, settings } = get();
+      const { state, settings, platformInfo } = get();
       // return true if any of the values are undefined
       return (
         state === undefined ||
         settings === undefined ||
-        false
+        platformInfo === undefined
       );
     },
   }));
@@ -110,6 +95,7 @@ export const createStore = () => {
       console.error(err);
       store.setState({ state: {} });
     });
+
 
   Platform.getPlatformInfo()
     .then((platformInfo) => {
@@ -148,13 +134,6 @@ export const createStore = () => {
     store.setState({ inputMethodIsInstalled: isInstalled });
   });
 
-  Install.isInstalled("desktopEntry").then((isInstalled) => {
-    store.setState({ desktopEntryIsInstalled: isInstalled });
-  });
-
-  Install.isInstalled("gnomeExtension").then((isInstalled) => {
-    store.setState({ gnomeExtensionIsInstalled: isInstalled });
-  });
 
   Install.installStatus.subscribe("accessibility", (isInstalled) => {
     store.setState({ accessibilityIsInstalled: isInstalled });

@@ -1,7 +1,13 @@
 use async_trait::async_trait;
 use fig_proto::FigProtobufEncodable;
-use tokio::io::{AsyncWrite, AsyncWriteExt};
-use tracing::{error, trace};
+use tokio::io::{
+    AsyncWrite,
+    AsyncWriteExt,
+};
+use tracing::{
+    error,
+    trace,
+};
 
 use crate::SendError;
 
@@ -26,7 +32,7 @@ where
             Err(err) => {
                 error!(%err, "Failed to encode message");
                 return Err(err.into());
-            }
+            },
         };
 
         self.write_all(&encoded_message).await?;

@@ -42,9 +42,7 @@ num-traits = "0.2"
 parking_lot.workspace = true
 pin-project = "1.1.10"
 portable-pty.workspace = true
-radix_trie = "0.2.1"
 regex.workspace = true
-semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 shell-color.workspace = true
@@ -81,7 +79,3 @@ winreg = "0.55.0"
 assert_cmd.workspace = true
 predicates = "3.0.1"
 tempfile.workspace = true
-
-[[bin]]
-name = "tcomp-term"
-path = "src/main.rs"

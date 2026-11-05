@@ -2,17 +2,36 @@ use std::io::Cursor;
 use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::{Error, anyhow};
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use anyhow::{
+    Error,
+    anyhow,
+};
+use bytes::{
+    Buf,
+    BufMut,
+    Bytes,
+    BytesMut,
+};
 use fig_util::Terminal;
 use flume::Receiver;
 use parking_lot::Mutex;
 use serde::Serialize;
-use serde_json::{Value, json};
-use tao::dpi::{LogicalPosition, LogicalSize};
+use serde_json::{
+    Value,
+    json,
+};
+use tao::dpi::{
+    LogicalPosition,
+    LogicalSize,
+};
 use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
-use tracing::{error, info, trace, warn};
+use tracing::{
+    error,
+    info,
+    trace,
+    warn,
+};
 
 use super::integrations::GSE_ALLOWLIST;
 use crate::EventLoopProxy;
@@ -36,7 +55,7 @@ impl SwayCommand {
         match self {
             SwayCommand::PositionWindow { x, y } => {
                 format!("for_window [window_role=\"autocomplete\"] move absolute position {x} px {y} px")
-            }
+            },
         }
     }
 }
@@ -190,11 +209,11 @@ pub async fn handle_incoming(conn: &mut UnixStream, buf: &mut BytesMut, sway_sta
                                             position: LogicalPosition { x, y }.into(),
                                             size: LogicalSize { width, height }.into(),
                                         }
-                                    }
+                                    },
                                     _ => {
                                         tracing::warn!(?app_id, "Failed to get window geometey");
                                         continue;
-                                    }
+                                    },
                                 };
 
                                 tracing::trace!(?geometey, ?app_id, "Received focus change");
@@ -209,7 +228,7 @@ pub async fn handle_incoming(conn: &mut UnixStream, buf: &mut BytesMut, sway_sta
                                     }
                                 }
                             }
-                        }
+                        },
                         Some(Value::String(event)) => trace!("Unknown event: {event}"),
                         Some(event) => trace!(%event, "Unknown event"),
                         None => trace!(event = "None", "Unknown event"),
@@ -217,14 +236,14 @@ pub async fn handle_incoming(conn: &mut UnixStream, buf: &mut BytesMut, sway_sta
                     _ => trace!(%payload_type, %payload, "Unknown payload type"),
                 }
                 break;
-            }
+            },
             ParseResult::Incomplete => {
                 conn.read_buf(buf).await.unwrap();
-            }
+            },
             ParseResult::Error(err) => {
                 error!(%err, "Failed to parse sway message");
                 break;
-            }
+            },
         }
     }
 }

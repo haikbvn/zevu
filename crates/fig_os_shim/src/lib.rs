@@ -9,10 +9,20 @@ use std::sync::Arc;
 
 pub use env::Env;
 pub use fs::Fs;
-pub use platform::{Os, Platform};
+pub use platform::{
+    Os,
+    Platform,
+};
 use process_info::FakePid;
 pub use process_info::ProcessInfo;
-pub use providers::{ContextArcProvider, ContextProvider, EnvProvider, FsProvider, PlatformProvider, SysInfoProvider};
+pub use providers::{
+    ContextArcProvider,
+    ContextProvider,
+    EnvProvider,
+    FsProvider,
+    PlatformProvider,
+    SysInfoProvider,
+};
 pub use sysinfo::SysInfo;
 
 pub trait Shim {

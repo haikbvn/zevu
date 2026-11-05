@@ -1,18 +1,42 @@
 use std::borrow::Cow;
 use std::future::Future;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{
+    AtomicU64,
+    Ordering,
+};
 
 use fig_os_shim::Context;
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize,
+    Serialize,
+};
 use serde_json::json;
-use tao::dpi::{Position, Size};
+use tao::dpi::{
+    Position,
+    Size,
+};
 use tao::window::Icon;
-use tracing::{Instrument, debug, debug_span, error};
-use wry::http::header::{ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_TYPE};
+use tracing::{
+    Instrument,
+    debug,
+    debug_span,
+    error,
+};
+use wry::http::header::{
+    ACCESS_CONTROL_ALLOW_ORIGIN,
+    CONTENT_TYPE,
+};
 use wry::http::status::StatusCode;
-use wry::http::{HeaderValue, Request as HttpRequest, Response as HttpResponse};
-use wry::{RequestAsyncResponder, WebViewId};
+use wry::http::{
+    HeaderValue,
+    Request as HttpRequest,
+    Response as HttpResponse,
+};
+use wry::{
+    RequestAsyncResponder,
+    WebViewId,
+};
 
 use crate::webview::WindowId;
 use crate::webview::window_id::WindowIdProvider;
@@ -71,7 +95,7 @@ where
                                 .body(err.to_string().into_bytes().into())
                         }
                         .unwrap()
-                    }
+                    },
                 };
 
                 response
@@ -84,12 +108,6 @@ where
 
                 debug!(status = %response.status(), "Custom proto response");
 
-                // Wry 0.48 checks WKURLSchemeTask lifetime while WebKit cancels
-                // tasks on the main thread. Serialize those operations to avoid
-                // answering a task between its validity check and cancellation.
-                #[cfg(target_os = "macos")]
-                dispatch::Queue::main().exec_async(move || responder.respond(response));
-                #[cfg(not(target_os = "macos"))]
                 responder.respond(response);
             }
             .in_current_span(),

@@ -1,5 +1,8 @@
 use std::fs::File;
-use std::io::{BufWriter, Write};
+use std::io::{
+    BufWriter,
+    Write,
+};
 use std::path::PathBuf;
 use std::time::SystemTime;
 
@@ -14,7 +17,10 @@ use serde_json::Value;
 use tracing::trace;
 
 use crate::Result;
-use crate::sqlite::{Db, database};
+use crate::sqlite::{
+    Db,
+    database,
+};
 
 const ALL_COLUMNS: &str = "id, command, shell, pid, session_id, cwd, start_time, duration, hostname, exit_code";
 

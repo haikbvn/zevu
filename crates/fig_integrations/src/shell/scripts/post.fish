@@ -1,12 +1,13 @@
 builtin contains $HOME/.local/bin $PATH
 or set --append PATH $HOME/.local/bin
 
-set --query TTY; or set TTY (command tty)
-set --export TTY
+# This script is piped into source; stderr retains the terminal's original fd.
+# Export the value in the same assignment: `set --export TTY` would erase it.
+set --export TTY (command tty <&2)
 
 set --export SHELL_PID $fish_pid
 
-set --query TCOMP_SHELL; or set TCOMP_SHELL ({{CLI_BINARY_NAME}} _ get-shell)
+set --query Q_SHELL; or set Q_SHELL ({{CLI_BINARY_NAME}} _ get-shell)
 
 function fig_osc
     builtin printf "\033]697;$argv[1]\007" $argv[2..-1]
@@ -34,7 +35,7 @@ function fig_wrap_prompt
 end
 
 function fig_preexec --on-event fish_preexec
-    fig_osc "OSCLock=%s" "$TCOMP_PTY_SESSION_ID"
+    fig_osc "OSCLock=%s" "$QTERM_SESSION_ID"
     fig_osc PreExec
 
     if fig_fn_defined fig_user_mode_prompt
@@ -53,17 +54,17 @@ end
 function fig_precmd --on-event fish_prompt
     set -l last_status $status
 
-    fig_osc "OSCUnlock=%s" "$TCOMP_PTY_SESSION_ID"
+    fig_osc "OSCUnlock=%s" "$QTERM_SESSION_ID"
     fig_osc "Dir=%s" "$PWD"
     fig_osc "Shell=fish"
-    fig_osc "ShellPath=%s" "$TCOMP_SHELL"
+    fig_osc "ShellPath=%s" "$Q_SHELL"
     if test -n "$WSL_DISTRO_NAME"
         fig_osc "WSLDistro=%s" "$WSL_DISTRO_NAME"
     end
     fig_osc "PID=%d" "$fish_pid"
     fig_osc "ExitCode=%s" "$last_status"
     fig_osc "TTY=%s" "$TTY"
-    fig_osc "Log=%s" "$TCOMP_LOG_LEVEL"
+    fig_osc "Log=%s" "$Q_LOG_LEVEL"
     fig_osc "FishSuggestionColor=%s" "$fish_color_autosuggestion"
 
     if test -n "$USER"
@@ -93,7 +94,7 @@ function fig_precmd --on-event fish_prompt
     fig_copy_fn fish_prompt fig_user_prompt
     function fish_prompt
         fig_wrap_prompt (fig_user_prompt)
-        fig_osc NewCmd=$TCOMP_PTY_SESSION_ID
+        fig_osc NewCmd=$QTERM_SESSION_ID
     end
 
     set fig_has_set_prompt 1
@@ -105,7 +106,7 @@ end
 
 set fig_has_set_prompt 0
 
-if test -n "$PROCESS_LAUNCHED_BY_TCOMP"
+if test -n "$PROCESS_LAUNCHED_BY_Q"
     fig_osc DoneSourcing
 end
 

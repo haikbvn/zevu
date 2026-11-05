@@ -1,15 +1,35 @@
 use std::ffi::c_void;
 
-use accessibility::util::{ax_call, bool_ax_call};
-use accessibility::{AXAttribute, AXUIElement};
-use accessibility_sys::{
-    AXUIElementCopyParameterizedAttributeValue, AXValueCreate, AXValueGetValue, AXValueRef,
-    kAXBoundsForRangeParameterizedAttribute, kAXValueTypeCFRange, kAXValueTypeCGRect,
+use accessibility::util::{
+    ax_call,
+    bool_ax_call,
 };
-use core_foundation::base::{CFRange, CFType, CFTypeRef, TCFType, TCFTypeRef};
+use accessibility::{
+    AXAttribute,
+    AXUIElement,
+};
+use accessibility_sys::{
+    AXUIElementCopyParameterizedAttributeValue,
+    AXValueCreate,
+    AXValueGetValue,
+    AXValueRef,
+    kAXBoundsForRangeParameterizedAttribute,
+    kAXValueTypeCFRange,
+    kAXValueTypeCGRect,
+};
+use core_foundation::base::{
+    CFRange,
+    CFType,
+    CFTypeRef,
+    TCFType,
+    TCFTypeRef,
+};
 use core_foundation::string::CFString;
 use core_graphics::geometry::CGRect;
-use tracing::{debug, error};
+use tracing::{
+    debug,
+    error,
+};
 
 #[derive(Debug)]
 pub struct CaretPosition {

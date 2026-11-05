@@ -3,16 +3,26 @@ use std::fmt::Display;
 use std::path::PathBuf;
 
 use camino::Utf8PathBuf;
-use fig_os_shim::{Context, EnvProvider, FsProvider, Os, PlatformProvider, Shim};
+use fig_os_shim::{
+    Context,
+    EnvProvider,
+    FsProvider,
+    Os,
+    PlatformProvider,
+    Shim,
+};
 use thiserror::Error;
 use time::OffsetDateTime;
 
 #[cfg(unix)]
 use crate::RUNTIME_DIR_NAME;
-use crate::env_var::{TCOMP_BUNDLE_METADATA_PATH, TCOMP_PARENT};
+use crate::env_var::Q_BUNDLE_METADATA_PATH;
 use crate::linux::PACKAGE_NAME;
-use crate::system_info::{in_cloudshell, is_remote};
-use crate::{BACKUP_DIR_NAME, DATA_DIR_NAME, TAURI_PRODUCT_NAME};
+use crate::{
+    BACKUP_DIR_NAME,
+    DATA_DIR_NAME,
+    TAURI_PRODUCT_NAME,
+};
 
 macro_rules! utf8_dir {
     ($name:ident, $($arg:ident: $type:ty),*) => {
@@ -49,8 +59,6 @@ pub enum DirectoryError {
     FromVecWithNul(#[from] std::ffi::FromVecWithNulError),
     #[error(transparent)]
     IntoString(#[from] std::ffi::IntoStringError),
-    #[error("{TCOMP_PARENT} env variable not set")]
-    QParentNotSet,
     #[error("must be ran from an appimage executable")]
     NotAppImage,
 }
@@ -111,29 +119,12 @@ pub fn config_dir() -> Result<PathBuf> {
     dirs::config_dir().ok_or(DirectoryError::NoHomeDirectory)
 }
 
-/// The old codewhisperer data directory
-///
-/// This should be removed at some point in the future, once all our users have migrated
-/// - MacOS: `$HOME/Library/Application Support/codewhisperer`
-pub fn old_fig_data_dir() -> Result<PathBuf> {
-    Ok(dirs::data_local_dir()
-        .ok_or(DirectoryError::NoHomeDirectory)?
-        .join("codewhisperer"))
-}
-
 /// The q data directory
 ///
 /// - Linux: `$XDG_DATA_HOME/{data_dir}` or `$HOME/.local/share/{data_dir}`
 /// - MacOS: `$HOME/Library/Application Support/{data_dir}`
 /// - Windows: `%LOCALAPPDATA%\{data_dir}`
 pub fn fig_data_dir() -> Result<PathBuf> {
-    if let Some(path) = std::env::var_os("TCOMP_DATA_DIR") {
-        let path = PathBuf::from(path);
-        if !path.is_absolute() {
-            return Err(DirectoryError::NoHomeDirectory);
-        }
-        return Ok(path);
-    }
     Ok(dirs::data_local_dir()
         .ok_or(DirectoryError::NoHomeDirectory)?
         .join(DATA_DIR_NAME))
@@ -156,14 +147,14 @@ pub fn local_data_dir<Ctx: FsProvider + EnvProvider + PlatformProvider>(ctx: &Ct
                 return Ok(path.into());
             }
             Ok(home_dir_ctx(ctx)?.join(".local/share"))
-        }
+        },
         Os::Mac => Ok(home_dir_ctx(ctx)?.join("Library/Application Support")),
         Os::Windows => {
             if let Some(path) = env.get_os("LOCALAPPDATA") {
                 return Ok(path.into());
             }
             Ok(home_dir_ctx(ctx)?.join("AppData").join("Local"))
-        }
+        },
         os => Err(DirectoryError::UnsupportedOs(os)),
     }
 }
@@ -222,17 +213,10 @@ pub fn runtime_dir() -> Result<PathBuf> {
 
 /// The q sockets directory of the local q installation
 ///
-/// - Linux: $XDG_RUNTIME_DIR/tcomp
-/// - MacOS: $TMPDIR/tcomp
+/// - Linux: $XDG_RUNTIME_DIR/cwrun
+/// - MacOS: $TMPDIR/cwrun
 /// - Windows: %TEMP%\{data_dir}\sockets
 pub fn sockets_dir() -> Result<PathBuf> {
-    if let Some(path) = std::env::var_os("TCOMP_RUNTIME_DIR") {
-        let path = PathBuf::from(path);
-        if !path.is_absolute() {
-            return Err(DirectoryError::NoRuntimeDirectory);
-        }
-        return Ok(path);
-    }
     cfg_if::cfg_if! {
         if #[cfg(unix)] {
             Ok(runtime_dir()?.join(RUNTIME_DIR_NAME))
@@ -247,8 +231,8 @@ pub fn sockets_dir() -> Result<PathBuf> {
 /// In WSL, this will correctly return the host machine socket path.
 /// In other remote environments, it returns the same as `sockets_dir`
 ///
-/// - Linux: $XDG_RUNTIME_DIR/tcomp
-/// - MacOS: $TMPDIR/tcomp
+/// - Linux: $XDG_RUNTIME_DIR/cwrun
+/// - MacOS: $TMPDIR/cwrun
 /// - Windows: %TEMP%\sockets
 pub fn host_sockets_dir() -> Result<PathBuf> {
     // TODO: make this work again
@@ -305,13 +289,6 @@ pub fn logs_dir() -> Result<PathBuf> {
 /// - Linux/MacOS: `$HOME/{backup_dir}`
 /// - Windows: `%USERPROFILE%\{backup_dir}`
 pub fn backups_dir() -> Result<PathBuf> {
-    if let Some(path) = std::env::var_os("TCOMP_BACKUP_DIR") {
-        let path = PathBuf::from(path);
-        if !path.is_absolute() {
-            return Err(DirectoryError::NoHomeDirectory);
-        }
-        return Ok(path);
-    }
     Ok(home_dir()?.join(BACKUP_DIR_NAME))
 }
 
@@ -326,52 +303,24 @@ pub fn utc_backup_dir() -> Result<PathBuf> {
     Ok(backups_dir()?.join(now))
 }
 
-/// The directory to the directory containing config for the `/context` feature in `q chat`.
-pub fn chat_global_context_path<Ctx: FsProvider + EnvProvider>(ctx: &Ctx) -> Result<PathBuf> {
-    Ok(home_dir_ctx(ctx)?
-        .join(".aws")
-        .join("amazonq")
-        .join("global_context.json"))
-}
-
-/// The directory to the directory containing config for the `/context` feature in `q chat`.
-pub fn chat_profiles_dir<Ctx: FsProvider + EnvProvider>(ctx: &Ctx) -> Result<PathBuf> {
-    Ok(home_dir_ctx(ctx)?.join(".aws").join("amazonq").join("profiles"))
-}
-
 /// The desktop app socket path
 ///
-/// - MacOS: `$TMPDIR/tcomp/desktop.sock`
-/// - Linux: `$XDG_RUNTIME_DIR/tcomp/desktop.sock`
+/// - MacOS: `$TMPDIR/cwrun/desktop.sock`
+/// - Linux: `$XDG_RUNTIME_DIR/cwrun/desktop.sock`
 /// - Windows: `%TEMP%\sockets\desktop.sock`
 pub fn desktop_socket_path() -> Result<PathBuf> {
     Ok(host_sockets_dir()?.join("desktop.sock"))
 }
 
-/// The path to remote socket
-// - Linux/MacOS on ssh: At the value of `TCOMP_PARENT`
-// - Linux/MacOS not on ssh:
-/// - MacOS: `$TMPDIR/tcomp/remote.sock`
-/// - Linux: `$XDG_RUNTIME_DIR/tcomp/remote.sock`
-/// - Windows: `%TEMP%\sockets\remote.sock`
+/// The local PTY transport socket, shared with the desktop listener.
 pub fn remote_socket_path() -> Result<PathBuf> {
-    // Normal implementation for non-test code
-    // TODO(grant): This is only enabled on Linux for now to prevent public dist
-    if is_remote() && !in_cloudshell() && cfg!(target_os = "linux") {
-        if let Some(parent_socket) = fig_os_shim::Env::new().get_os(TCOMP_PARENT) {
-            Ok(PathBuf::from(parent_socket))
-        } else {
-            Err(DirectoryError::QParentNotSet)
-        }
-    } else {
-        local_remote_socket_path()
-    }
+    local_remote_socket_path()
 }
 
 /// The path to local remote socket
 ///
-/// - MacOS: `$TMPDIR/tcomp/remote.sock`
-/// - Linux: `$XDG_RUNTIME_DIR/tcomp/remote.sock`
+/// - MacOS: `$TMPDIR/cwrun/remote.sock`
+/// - Linux: `$XDG_RUNTIME_DIR/cwrun/remote.sock`
 /// - Windows: `%TEMP%\sockets\remote.sock`
 pub fn local_remote_socket_path() -> Result<PathBuf> {
     Ok(host_sockets_dir()?.join("remote.sock"))
@@ -380,8 +329,8 @@ pub fn local_remote_socket_path() -> Result<PathBuf> {
 /// Get path to a figterm socket
 ///
 /// - Linux/Macos: `/var/tmp/fig/%USERNAME%/figterm/$SESSION_ID.sock`
-/// - MacOS: `$TMPDIR/tcomp/t/$SESSION_ID.sock`
-/// - Linux: `$XDG_RUNTIME_DIR/tcomp/t/$SESSION_ID.sock`
+/// - MacOS: `$TMPDIR/cwrun/t/$SESSION_ID.sock`
+/// - Linux: `$XDG_RUNTIME_DIR/cwrun/t/$SESSION_ID.sock`
 /// - Windows: `%TEMP%\sockets\t\$SESSION_ID.sock`
 pub fn figterm_socket_path(session_id: impl Display) -> Result<PathBuf> {
     Ok(sockets_dir()?.join("t").join(format!("{session_id}.sock")))
@@ -417,7 +366,7 @@ pub fn resources_path_ctx<Ctx: EnvProvider + PlatformProvider>(ctx: &Ctx) -> Res
             } else {
                 Ok(format!("/usr/share/{}", PACKAGE_NAME).into())
             }
-        }
+        },
         fig_os_shim::Os::Windows => Ok(fig_data_dir()?.join("resources")),
         _ => Err(DirectoryError::UnsupportedOs(os)),
     }
@@ -444,7 +393,7 @@ pub fn manifest_path() -> Result<PathBuf> {
 /// resources directory from the AppImage mount, known only by the AppImage itself (ie, the desktop
 /// binary).
 pub fn bundle_metadata_path<Ctx: EnvProvider + PlatformProvider>(ctx: &Ctx) -> Result<PathBuf> {
-    if let Some(path) = ctx.env().get_os(TCOMP_BUNDLE_METADATA_PATH) {
+    if let Some(path) = ctx.env().get_os(Q_BUNDLE_METADATA_PATH) {
         return Ok(path.into());
     }
     Ok(resources_path_ctx(ctx)?.join("bundle-metadata").join("metadata.json"))
@@ -457,15 +406,6 @@ pub fn bundle_metadata_path<Ctx: EnvProvider + PlatformProvider>(ctx: &Ctx) -> R
 /// - Windows: `%LOCALAPPDATA%\{data_dir}\settings.json`
 pub fn settings_path() -> Result<PathBuf> {
     Ok(fig_data_dir()?.join("settings.json"))
-}
-
-/// The path to the lock file used to indicate that the app is updating
-///
-/// - Linux: `$HOME/.local/share/{data_dir}/update.lock`
-/// - MacOS: `$HOME/Library/Application Support/{data_dir}/update.lock`
-/// - Windows: `%LOCALAPPDATA%\{data_dir}\update.lock`
-pub fn update_lock_path(ctx: &impl FsProvider) -> Result<PathBuf> {
-    Ok(fig_data_dir_ctx(ctx)?.join("update.lock"))
 }
 
 /// The path to the .zip bundle containing the GNOME Shell Extension identified by
@@ -542,215 +482,9 @@ utf8_dir!(backups_dir);
 utf8_dir!(logs_dir);
 utf8_dir!(settings_path);
 
-#[cfg(test)]
-mod linux_tests {
-    use super::*;
-
-    #[test]
-    fn all_paths() {
-        let ctx = Context::new();
-        assert!(home_dir().is_ok());
-        #[cfg(unix)]
-        assert!(home_local_bin().is_ok());
-        assert!(fig_data_dir().is_ok());
-        assert!(sockets_dir().is_ok());
-        assert!(remote_socket_path().is_ok());
-        assert!(local_remote_socket_path().is_ok());
-        assert!(figterm_socket_path("test").is_ok());
-        assert!(resources_path().is_ok());
-        assert!(manifest_path().is_ok());
-        assert!(backups_dir().is_ok());
-        assert!(logs_dir().is_ok());
-        assert!(settings_path().is_ok());
-        assert!(update_lock_path(&ctx).is_ok());
-    }
-}
-
-// TODO(grant): Add back path tests on linux
 #[cfg(all(test, not(target_os = "linux")))]
 mod tests {
-    use insta;
-
     use super::*;
-
-    /// If this test fails then either of these paths were changed.
-    ///
-    /// Since we set the permissions of the parent of these paths, make sure they're in folders we
-    /// own otherwise we will set permissions of directories we shouldn't
-    #[test]
-    fn test_socket_paths() {
-        #[cfg(unix)]
-        assert_eq!(
-            host_sockets_dir().unwrap().file_name().unwrap().to_str().unwrap(),
-            "tcomp"
-        );
-
-        #[cfg(windows)]
-        assert_eq!(
-            host_sockets_dir().unwrap().file_name().unwrap().to_str().unwrap(),
-            format!("sockets")
-        );
-
-        #[cfg(unix)]
-        assert_eq!(
-            figterm_socket_path("").unwrap().parent().unwrap().file_name().unwrap(),
-            "t"
-        );
-
-        #[cfg(windows)]
-        assert_eq!(
-            figterm_socket_path("").unwrap().parent().unwrap().file_name().unwrap(),
-            "t"
-        );
-    }
-
-    macro_rules! assert_directory {
-        ($value:expr, @$snapshot:literal) => {
-            insta::assert_snapshot!(
-                sanitized_directory_path($value),
-                @$snapshot,
-            )
-        };
-    }
-
-    macro_rules! macos {
-        ($value:expr, @$snapshot:literal) => {
-            #[cfg(target_os = "macos")]
-            assert_directory!($value, @$snapshot)
-        };
-    }
-
-    macro_rules! linux {
-        ($value:expr, @$snapshot:literal) => {
-            #[cfg(target_os = "linux")]
-            assert_directory!($value, @$snapshot)
-        };
-    }
-
-    macro_rules! windows {
-        ($value:expr, @$snapshot:literal) => {
-            #[cfg(target_os = "windows")]
-            assert_directory!($value, @$snapshot)
-        };
-    }
-
-    fn sanitized_directory_path(path: Result<PathBuf>) -> String {
-        let mut path = path.unwrap().into_os_string().into_string().unwrap();
-
-        if let Ok(home) = std::env::var("HOME") {
-            let home = home.strip_suffix('/').unwrap_or(&home);
-            path = path.replace(home, "$HOME");
-        }
-
-        let user = whoami::username();
-        path = path.replace(&user, "$USER");
-
-        if let Ok(tmpdir) = std::env::var("TMPDIR") {
-            let tmpdir = tmpdir.strip_suffix('/').unwrap_or(&tmpdir);
-            path = path.replace(tmpdir, "$TMPDIR");
-        }
-
-        #[cfg(target_os = "macos")]
-        {
-            if let Ok(tmpdir) = macos_tempdir() {
-                let tmpdir = tmpdir.to_str().unwrap();
-                let tmpdir = tmpdir.strip_suffix('/').unwrap_or(tmpdir);
-                path = path.replace(tmpdir, "$TMPDIR");
-            };
-        }
-
-        if let Ok(xdg_runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
-            let xdg_runtime_dir = xdg_runtime_dir.strip_suffix('/').unwrap_or(&xdg_runtime_dir);
-            path = path.replace(xdg_runtime_dir, "$XDG_RUNTIME_DIR");
-        }
-
-        #[cfg(target_os = "linux")]
-        {
-            path = path.replace("/tmp", "$TMPDIR");
-        }
-
-        path
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn snapshot_home_local_bin() {
-        #[cfg(target_os = "linux")]
-        linux!(home_local_bin(), @"$HOME/.local/bin");
-        #[cfg(target_os = "macos")]
-        macos!(home_local_bin(), @"$HOME/.local/bin");
-    }
-
-    #[test]
-    fn snapshot_fig_data_dir() {
-        linux!(fig_data_dir(), @"$HOME/.local/share/termcomplete");
-        macos!(fig_data_dir(), @"$HOME/Library/Application Support/termcomplete");
-        windows!(fig_data_dir(), @r"C:\Users\$USER\AppData\Local\termcomplete");
-    }
-
-    #[test]
-    fn snapshot_sockets_dir() {
-        linux!(sockets_dir(), @"$XDG_RUNTIME_DIR/tcomp");
-        macos!(sockets_dir(), @"$TMPDIR/tcomp");
-        windows!(sockets_dir(), @r"C:\Users\$USER\AppData\Local\Temp\termcomplete\sockets");
-    }
-
-    #[test]
-    fn snapshot_themes_dir() {
-        linux!(themes_dir(&Context::new()), @"/usr/share/fig/themes");
-        macos!(themes_dir(&Context::new()), @"/Applications/Termcomplete.app/Contents/Resources/themes");
-        windows!(themes_dir(&Context::new()), @r"C:\Users\$USER\AppData\Local\termcomplete\resources\themes");
-    }
-
-    #[test]
-    fn snapshot_backups_dir() {
-        linux!(backups_dir(), @"$HOME/.termcomplete.dotfiles.bak");
-        macos!(backups_dir(), @"$HOME/.termcomplete.dotfiles.bak");
-        windows!(backups_dir(), @r"C:\Users\$USER\.termcomplete.dotfiles.bak");
-    }
-
-    #[test]
-    fn snapshot_fig_socket_path() {
-        linux!(desktop_socket_path(), @"$XDG_RUNTIME_DIR/tcomp/desktop.sock");
-        macos!(desktop_socket_path(), @"$TMPDIR/tcomp/desktop.sock");
-        windows!(desktop_socket_path(), @r"C:\Users\$USER\AppData\Local\Temp\termcomplete\sockets\desktop.sock");
-    }
-
-    #[test]
-    fn snapshot_remote_socket_path() {
-        linux!(remote_socket_path(), @"$XDG_RUNTIME_DIR/tcomp/remote.sock");
-        macos!(remote_socket_path(), @"$TMPDIR/tcomp/remote.sock");
-        windows!(remote_socket_path(), @r"C:\Users\$USER\AppData\Local\Temp\termcomplete\sockets\remote.sock");
-    }
-
-    #[test]
-    fn snapshot_local_remote_socket_path() {
-        linux!(local_remote_socket_path(), @"$XDG_RUNTIME_DIR/tcomp/remote.sock");
-        macos!(local_remote_socket_path(), @"$TMPDIR/tcomp/remote.sock");
-        windows!(local_remote_socket_path(), @r"C:\Users\$USER\AppData\Local\Temp\termcomplete\sockets\remote.sock");
-    }
-
-    #[test]
-    fn snapshot_figterm_socket_path() {
-        linux!(figterm_socket_path("$SESSION_ID"), @"$XDG_RUNTIME_DIR/tcomp/t/$SESSION_ID.sock");
-        macos!(figterm_socket_path("$SESSION_ID"), @"$TMPDIR/tcomp/t/$SESSION_ID.sock");
-        windows!(figterm_socket_path("$SESSION_ID"), @r"C:\Users\$USER\AppData\Local\Temp\termcomplete\sockets\t\$SESSION_ID.sock");
-    }
-
-    #[test]
-    fn snapshot_settings_path() {
-        linux!(settings_path(), @"$HOME/.local/share/termcomplete/settings.json");
-        macos!(settings_path(), @"$HOME/Library/Application Support/termcomplete/settings.json");
-        windows!(settings_path(), @r"C:\Users\$USER\AppData\Local\termcomplete\settings.json");
-    }
-
-    #[test]
-    fn snapshot_update_lock_path() {
-        let ctx = Context::new();
-        linux!(update_lock_path(&ctx), @"$HOME/.local/share/termcomplete/update.lock");
-        macos!(update_lock_path(&ctx), @"$HOME/Library/Application Support/termcomplete/update.lock");
-        windows!(update_lock_path(&ctx), @r"C:\Users\$USER\AppData\Local\termcomplete\update.lock");
-    }
 
     #[test]
     #[cfg(unix)]
@@ -773,10 +507,4 @@ mod tests {
         assert!(secure_socket_bytes <= MAX_SOCKET_LEN);
     }
 
-    #[test]
-    #[cfg(target_os = "macos")]
-    fn macos_tempdir_test() {
-        let tmpdir = macos_tempdir().unwrap();
-        println!("{:?}", tmpdir);
-    }
 }

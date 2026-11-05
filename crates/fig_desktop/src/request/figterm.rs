@@ -1,8 +1,14 @@
 use fig_proto::fig::InsertTextRequest;
-use fig_remote_ipc::figterm::{FigtermCommand, FigtermState};
+use fig_remote_ipc::figterm::{
+    FigtermCommand,
+    FigtermState,
+};
 use uuid::Uuid;
 
-use super::{RequestResult, RequestResultImpl};
+use super::{
+    RequestResult,
+    RequestResultImpl,
+};
 
 pub async fn insert_text(request: InsertTextRequest, state: &FigtermState) -> RequestResult {
     let figterm_command = match request.r#type {
@@ -36,7 +42,7 @@ pub async fn insert_text(request: InsertTextRequest, state: &FigtermState) -> Re
                 .send(figterm_command)
                 .map_err(|err| format!("Failed sending command to figterm session: {err}"))?;
             RequestResult::success()
-        }
+        },
         None => RequestResult::error("No figterm sessions"),
     }
 }

@@ -230,9 +230,6 @@ const updateSuggestions =
         const suggestions = computeSuggestions(updatedState, settings);
         logger.info("Recomputed suggestions", { suggestions });
 
-        if (willBeVisible && !updatedState.figState.cwd) {
-
-        }
 
         // If old state is visible, and user has changed the selected item try to
         // keep the same item selected.

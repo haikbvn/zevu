@@ -2,10 +2,20 @@
 use std::ffi::c_void;
 use std::fmt;
 
-use core_foundation::base::{CFRange, TCFType};
-use core_foundation::{declare_TCFType, impl_TCFType};
+use core_foundation::base::{
+    CFRange,
+    TCFType,
+};
+use core_foundation::{
+    declare_TCFType,
+    impl_TCFType,
+};
 use core_foundation_sys::base::CFTypeID;
-use core_graphics::display::{CGPoint, CGRect, CGSize};
+use core_graphics::display::{
+    CGPoint,
+    CGRect,
+    CGSize,
+};
 
 pub type AXValueType = u32;
 pub const kAXValueTypeCGPoint: u32 = 1;

@@ -1,7 +1,13 @@
 use std::fs;
 
-use apple_bundle::prelude::{InfoPlist as AppleInfoPlist, *};
-use serde::{Deserialize, Serialize};
+use apple_bundle::prelude::{
+    InfoPlist as AppleInfoPlist,
+    *,
+};
+use serde::{
+    Deserialize,
+    Serialize,
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct CargoToml {
@@ -100,10 +106,6 @@ fn main() {
 
     let manifest = toml::from_str::<CargoToml>(&config).unwrap();
     let mut bundle = manifest.package.metadata.bundle;
-    assert!(
-        bundle.bundle_identifier.contains(".inputmethod."),
-        "The macOS input-method identifier must contain .inputmethod."
-    );
 
     // Set InputMethodServerControllerClass env var which is used by Input Method at compile time
     println!(
@@ -161,7 +163,7 @@ fn main() {
                 ..Default::default()
             },
             operating_system_version: OperatingSystemVersion {
-                minimum_system_version: Some("10.13".to_string()),
+                minimum_system_version: Some("13.0".to_string()),
                 ..Default::default()
             },
             ..Default::default()

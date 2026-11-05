@@ -8,13 +8,15 @@ pub mod gnome_extension;
 pub mod input_method;
 pub mod intellij;
 pub mod shell;
-pub mod ssh;
 #[cfg(target_os = "macos")]
 pub mod vscode;
 
 use async_trait::async_trait;
 pub use backup::backup_file;
-pub use error::{Error, Result};
+pub use error::{
+    Error,
+    Result,
+};
 pub use file::FileIntegration;
 
 #[async_trait]

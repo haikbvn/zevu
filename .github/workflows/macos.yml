@@ -1,47 +1,27 @@
-name: macOS builds
-on:
-  push:
-    branches: [main]
-  pull_request:
-  workflow_dispatch:
-permissions:
-  contents: read
-concurrency:
-  group: macos-${{ github.ref }}
-  cancel-in-progress: true
+name: macOS
+on: [push, pull_request]
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-15-intel
-            target: x86_64-apple-darwin
-          - runner: macos-15
-            target: aarch64-apple-darwin
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 90
+  verify:
+    runs-on: macos-15-intel
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Install isolated toolchains
-        run: bash scripts/bootstrap.sh
-      - name: Build development package
-        run: |
-          source .tools/env.sh
-          python3.11 scripts/standalone.py build --target '${{ matrix.target }}'
-      - name: Native and JavaScript regression tests
-        run: |
-          source .tools/env.sh
-          python3.11 scripts/standalone.py test --target '${{ matrix.target }}'
-      - name: Check runtime dependency boundary
-        run: |
-          source .tools/env.sh
-          python3.11 scripts/audit.py
-      - name: Upload development packages
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+      - uses: actions/checkout@v4
+      - name: Prepare local dependencies
+        env:
+          ZEVU_DEPS_ONLY: "1"
+        run: bash scripts/setup.sh
+      - name: Enable Corepack package manager shims
+        run: mise exec -- corepack enable
+      - name: Build signed host bundle and companions
+        run: mise exec -- bash scripts/build-macos.sh
+      - name: Frontend regression suite
+        run: mise exec -- corepack pnpm exec vitest run
+      - name: Prepare real PTY executables
+        run: cargo build --locked -p q_cli -p figterm
+      - name: Rust and isolated shell regressions
+        run: cargo test --locked --workspace -- --test-threads=1
+      - name: Verify bundle
+        run: codesign --verify --deep --strict dist/Zevu.app
+      - uses: actions/upload-artifact@v4
         with:
-          name: Termcomplete-${{ matrix.target }}
-          path: |
-            dist/*.dmg
-            dist/*.sha256
-          if-no-files-found: error
+          name: Zevu-macos-host
+          path: dist/

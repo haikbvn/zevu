@@ -4,11 +4,20 @@ use std::process::ExitCode;
 
 use anstream::println;
 use clap::Args;
-use crossterm::style::{Color, Stylize};
-use eyre::{Result, WrapErr};
+use crossterm::style::{
+    Color,
+    Stylize,
+};
+use eyre::{
+    Result,
+    WrapErr,
+};
 use fig_os_shim::Context;
 use fig_util::directories;
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize,
+    Serialize,
+};
 use serde_json::json;
 
 // var BuiltinThemes []string = []string{"dark", "light", "system"}
@@ -84,14 +93,14 @@ impl ThemeArgs {
                                 if let Some(github) = github {
                                     println!("  💻 {}", format!("github.com/{github}").underlined());
                                 }
-                            }
+                            },
                             None => println!("{theme_line}"),
                         }
                         println!();
 
                         fig_settings::settings::set_value("autocomplete.theme", theme_str)?;
                         Ok(ExitCode::SUCCESS)
-                    }
+                    },
                     Err(_) => {
                         if BUILT_IN_THEMES.contains(&theme_str) {
                             println!("› Switching to theme '{}'", theme_str.bold());
@@ -100,9 +109,9 @@ impl ThemeArgs {
                         } else {
                             eyre::bail!("'{theme_str}' does not exist in {}", theme_dir.display())
                         }
-                    }
+                    },
                 }
-            }
+            },
             None => {
                 let theme =
                     fig_settings::settings::get_value("autocomplete.theme")?.unwrap_or_else(|| json!(DEFAULT_THEME));
@@ -114,7 +123,7 @@ impl ThemeArgs {
 
                 println!("{theme_str}");
                 Ok(ExitCode::SUCCESS)
-            }
+            },
         }
     }
 }

@@ -1,30 +1,80 @@
+// This is needed for objc
+#![allow(unexpected_cfgs)]
+
 use std::borrow::Cow;
 use std::io::ErrorKind;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 use std::process::Command;
 use std::ptr;
 
 use async_trait::async_trait;
-use core_foundation::array::{CFArray, CFArrayRef};
-use core_foundation::base::{Boolean, CFGetTypeID, CFType, CFTypeID, CFTypeRef, OSStatus, TCFType, TCFTypeRef};
+use core_foundation::array::{
+    CFArray,
+    CFArrayRef,
+};
+use core_foundation::base::{
+    Boolean,
+    CFGetTypeID,
+    CFType,
+    CFTypeID,
+    CFTypeRef,
+    OSStatus,
+    TCFType,
+    TCFTypeRef,
+};
 use core_foundation::boolean::CFBoolean;
-use core_foundation::bundle::{CFBundle, CFBundleRef};
-use core_foundation::dictionary::{CFDictionary, CFDictionaryRef};
-use core_foundation::string::{CFString, CFStringRef};
-use core_foundation::url::{CFURL, CFURLRef};
-use core_foundation::{declare_TCFType, impl_TCFType};
+use core_foundation::bundle::{
+    CFBundle,
+    CFBundleRef,
+};
+use core_foundation::dictionary::{
+    CFDictionary,
+    CFDictionaryRef,
+};
+use core_foundation::string::{
+    CFString,
+    CFStringRef,
+};
+use core_foundation::url::{
+    CFURL,
+    CFURLRef,
+};
+use core_foundation::{
+    declare_TCFType,
+    impl_TCFType,
+};
 use fig_settings::state;
 use fig_util::Terminal;
 use fig_util::consts::CLI_BINARY_NAME;
 use fig_util::directories::home_dir;
 use fig_util::macos::BUNDLE_CONTENTS_HELPERS_PATH;
 use macos_utils::applications;
-use serde::{Deserialize, Serialize};
+use objc::runtime::Object;
+use objc::{
+    class,
+    msg_send,
+    sel,
+    sel_impl,
+};
+use serde::{
+    Deserialize,
+    Serialize,
+};
 use tokio::fs;
-use tracing::{debug, info, trace};
+use tracing::{
+    debug,
+    info,
+    trace,
+};
 
 use crate::Integration;
-use crate::error::{ErrorExt, Result};
+use crate::error::{
+    ErrorExt,
+    Result,
+};
 
 pub enum __TISInputSource {}
 pub type TISInputSourceRef = *const __TISInputSource;
@@ -98,10 +148,6 @@ pub enum InputMethodError {
     NotSelected,
     #[error("Input method not running")]
     NotRunning,
-    #[error(
-        "macOS has not finished activating the cursor helper. Quit and reopen Termcomplete, then retry Setup. Last error: {last_error}"
-    )]
-    RegistrationTimeout { last_error: String },
     #[error("An unknown error occurred")]
     UnknownError,
     #[error("Not installed")]
@@ -217,7 +263,7 @@ impl std::default::Default for InputMethod {
         let fig_app_path = fig_util::app_bundle_path();
         let bundle_path = fig_app_path
             .join(BUNDLE_CONTENTS_HELPERS_PATH)
-            .join("TermcompleteInputMethod.app");
+            .join("ZevuInputMethod.app");
         Self { bundle_path }
     }
 }
@@ -249,20 +295,13 @@ impl InputMethod {
     pub fn register(location: impl AsRef<Path>) -> Result<(), InputMethodError> {
         debug!("Registering input source...");
 
-        // Both services need the actual bundle. Registering the installation
-        // symlink can remove the source from TIS after an application upgrade.
-        let actual_path = location
-            .as_ref()
-            .canonicalize()
-            .map_err(|_| InputMethodError::InvalidDestination)?;
-        let actual_url = CFURL::from_path(actual_path, true).ok_or(InputMethodError::InvalidDestination)?;
-        let status = unsafe { LSRegisterURL(actual_url.as_concrete_TypeRef(), true) };
-        if status != 0 {
-            return Err(InputMethodError::OSStatusError(status));
-        }
+        let url = match CFURL::from_path(location, true) {
+            Some(url) => url,
+            None => return Err(InputMethodError::InvalidDestination),
+        };
 
         unsafe {
-            match TISRegisterInputSource(actual_url.as_concrete_TypeRef()) {
+            match TISRegisterInputSource(url.as_concrete_TypeRef()) {
                 0 => Ok(()),
                 i => Err(InputMethodError::OSStatusError(i)),
             }
@@ -270,7 +309,7 @@ impl InputMethod {
     }
 
     pub fn list_input_sources_for_bundle_id(bundle_id: &str) -> Option<Vec<TISInputSource>> {
-        let key: CFString = unsafe { CFString::wrap_under_get_rule(kTISPropertyBundleID) };
+        let key: CFString = unsafe { CFString::wrap_under_create_rule(kTISPropertyBundleID) };
         let value = CFString::from(bundle_id);
         let properties = CFDictionary::from_CFType_pairs(&[(key.as_CFType(), value.as_CFType())]);
 
@@ -291,11 +330,6 @@ unsafe extern "C" {
 
 #[link(name = "AppKit", kind = "framework")]
 unsafe extern "C" {}
-
-#[link(name = "CoreServices", kind = "framework")]
-unsafe extern "C" {
-    fn LSRegisterURL(url: CFURLRef, update: bool) -> OSStatus;
-}
 
 impl InputMethod {
     pub fn input_source(&self) -> Result<TISInputSource, InputMethodError> {
@@ -332,7 +366,7 @@ impl InputMethod {
                             }
                         }),
                     }
-                }
+                },
             }
         }
     }
@@ -344,7 +378,7 @@ impl InputMethod {
                 return Err(InputMethodError::InvalidBundle {
                     inner: "Input method bundle name cannot be determined".into(),
                 });
-            }
+            },
         };
 
         Ok(InputMethod::input_method_directory().join(input_method_name))
@@ -357,7 +391,7 @@ impl InputMethod {
                 return Err(InputMethodError::InvalidBundle {
                     inner: "Could not get URL for input method bundle".into(),
                 });
-            }
+            },
         };
 
         let bundle = match CFBundle::new(url) {
@@ -366,7 +400,7 @@ impl InputMethod {
                 return Err(InputMethodError::InvalidBundle {
                     inner: format!("Could not load bundle for URL {}", self.bundle_path.display()).into(),
                 });
-            }
+            },
         };
 
         let identifier = unsafe { CFBundleGetIdentifier(bundle.as_concrete_TypeRef()) };
@@ -402,6 +436,21 @@ impl InputMethod {
     }
 }
 
+fn str_to_nsstring(str: &str) -> &Object {
+    const UTF8_ENCODING: usize = 4;
+    unsafe {
+        let ns_string: &mut Object = msg_send![class!(NSString), alloc];
+        let ns_string: &mut Object = msg_send![
+            ns_string,
+            initWithBytes: str.as_ptr()
+            length: str.len()
+            encoding: UTF8_ENCODING
+        ];
+        let _: () = msg_send![ns_string, autorelease];
+        ns_string
+    }
+}
+
 #[async_trait]
 impl Integration for InputMethod {
     async fn is_installed(&self) -> Result<()> {
@@ -420,7 +469,7 @@ impl Integration for InputMethod {
                     }
                     .into());
                 }
-            }
+            },
             Err(err) if err.kind() == ErrorKind::NotFound => return Err(InputMethodError::NotInstalled.into()),
             Err(err) => return Err(err.into()),
         }
@@ -460,23 +509,16 @@ impl Integration for InputMethod {
     }
 
     async fn install(&self) -> Result<()> {
+        // A healthy registered helper must not invalidate already running terminals.
+        if self.is_installed().await.is_ok() {
+            return Ok(());
+        }
+
         {
             let destination = self.target_bundle_path()?;
 
-            // Preserve an already correct link; replacing it invalidates the
-            // file identity used by macOS input-source registration.
-            let linked = match fs::read_link(&destination).await {
-                Ok(current) if current == self.bundle_path => true,
-                Ok(_) => {
-                    fs::remove_file(&destination).await?;
-                    false
-                }
-                Err(error) if error.kind() == ErrorKind::NotFound => false,
-                Err(error) => {
-                    return Err(error)
-                        .with_context(|_| "The cursor-helper destination is not an owned symlink".to_owned());
-                }
-            };
+            // Attempt to emove existing symlink
+            fs::remove_file(&destination).await.ok();
 
             // Create the parent directory if it doesn't exist
             if let Some(parent) = destination.parent() {
@@ -486,22 +528,27 @@ impl Integration for InputMethod {
             }
 
             // Create new symlink
-            if !linked {
-                fs::symlink(&self.bundle_path, &destination)
-                    .await
-                    .with_context(|_| format!("Could not create symlink {}", destination.display()))?;
-            }
+            fs::symlink(&self.bundle_path, &destination)
+                .await
+                .with_context(|_| format!("Could not create symlink {}", destination.display()))?;
 
             // Register input source
             InputMethod::register(&destination)?;
 
             debug!("Launch Input Method...");
             if let Some(dest) = destination.to_str() {
-                Command::new("open")
-                    .arg(dest)
-                    .spawn()
-                    .with_context(|_| "Could not launch the cursor helper".to_owned())?;
+                Command::new("open").arg(dest);
             }
+
+            run_on_main(|| {
+                let source = self.input_source()?;
+                source.enable()?;
+                Ok::<(), InputMethodError>(())
+            })?;
+
+            // The 'enabled' property of an input source is never updated for the process that
+            // invokes `TISEnableInputSource` Unclear why this is, but we handle it by
+            // calling out to the q_cli to finish the second half of the installation.
         }
 
         // todo: pull this into a function in fig_directories
@@ -510,42 +557,27 @@ impl Integration for InputMethod {
             .join("MacOS")
             .join(CLI_BINARY_NAME);
 
-        // Enable on the desktop's main thread; verify the cached TIS properties
-        // in a separate process. Both registration and activation may settle later.
-        let mut installed = false;
-        let mut last_error = String::from("The helper is not visible to macOS yet");
-        for _ in 0..15 {
-            if let Err(error) = run_on_main(|| self.input_source()?.enable()) {
-                last_error = error.to_string();
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                continue;
-            }
-            let mut command = tokio::process::Command::new(&q_cli_path);
-            command
+        loop {
+            let out = tokio::process::Command::new(&q_cli_path)
                 .args(["_", "attempt-to-finish-input-method-installation"])
                 .arg(&self.bundle_path)
-                .kill_on_drop(true);
-            match tokio::time::timeout(std::time::Duration::from_secs(3), command.output()).await {
-                Ok(Ok(out)) if out.status.success() => {
-                    installed = true;
-                    break;
+                .output()
+                .await
+                .with_context(|err| format!("Could not run {CLI_BINARY_NAME} cli: {err}"))?;
+
+            if out.status.code() == Some(0) {
+                info!("Input method installed successfully!");
+                break;
+            } else {
+                let err = String::from_utf8_lossy(&out.stdout);
+                match serde_json::from_str::<InputMethodError>(&err).ok() {
+                    Some(error) => debug!("{error}"),
+                    None => debug!("Could not parse output as known error: {err}"),
                 }
-                Ok(Ok(out)) => {
-                    last_error = String::from_utf8_lossy(&out.stdout).trim().to_owned();
-                    if last_error.is_empty() {
-                        last_error = String::from_utf8_lossy(&out.stderr).trim().to_owned();
-                    }
-                    debug!(%last_error, "Cursor helper activation is not ready");
-                }
-                Ok(Err(error)) => return Err(error).with_context(|_| format!("Could not run {CLI_BINARY_NAME} cli")),
-                Err(_) => last_error = String::from("The activation process timed out"),
             }
+
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
-        if !installed {
-            return Err(InputMethodError::RegistrationTimeout { last_error }.into());
-        }
-        info!("Input method installed successfully!");
 
         // Store PIDs of all relevant terminal emulators (input method will not work until these
         // processes are restarted)
@@ -558,7 +590,7 @@ impl Integration for InputMethod {
                             true,
                         )
                         .ok();
-                    }
+                    },
                     _ => (),
                 }
             }
@@ -574,37 +606,35 @@ impl Integration for InputMethod {
 
         let destination = self.target_bundle_path()?;
 
-        match fs::read_link(&destination).await {
-            Ok(target) if target == self.bundle_path => {}
-            Ok(_) => {
-                return Err(InputMethodError::InvalidBundle {
-                    inner: "Refusing to remove a helper link owned by another installation".into(),
-                }
-                .into());
-            }
-            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
-            Err(error) => return Err(error.into()),
-        }
-        run_on_main(|| {
-            match self.input_source() {
-                Ok(source) => {
-                    if source.is_selected().unwrap_or(false) {
-                        source.deselect()?;
-                    }
-                    if source.is_enabled().unwrap_or(false) {
-                        source.disable()?;
-                    }
-                    Ok(())
-                }
-                // A partial registration still needs its owned link cleaned up.
-                Err(
-                    InputMethodError::CouldNotListInputSources
-                    | InputMethodError::NoInputSourcesForBundleIdentifier { .. },
-                ) => Ok(()),
-                Err(error) => Err(error),
-            }
+        let binding = run_on_main(|| {
+            let input_source = self.input_source()?;
+            input_source.deselect()?;
+            input_source.disable()?;
+
+            Ok::<_, InputMethodError>(input_source.bundle_id())
         })?;
-        self.terminate()?;
+
+        let binding = binding.ok_or_else(|| InputMethodError::InvalidBundle {
+            inner: "Could not get bundle id".into(),
+        })?;
+
+        // todo(mschrage): Terminate input method binary using Cocoa APIs
+        unsafe {
+            let bundle_id: &Object = str_to_nsstring(binding.as_str());
+            let running_input_method_array: &mut Object = msg_send![
+                class!(NSRunningApplication),
+                runningApplicationsWithBundleIdentifier: bundle_id
+            ];
+            let running_input_method_array_len: u64 = msg_send![running_input_method_array, count];
+
+            if running_input_method_array_len > 0 {
+                let running_input_method: &mut Object = msg_send![running_input_method_array, objectAtIndex: 0];
+
+                let _: () = msg_send![running_input_method, terminate];
+            }
+        }
+
+        // Remove symbolic link
         fs::remove_file(destination).await?;
 
         Ok(())
@@ -626,8 +656,8 @@ impl Integration for InputMethod {
                     fs::remove_file(&destination).await?;
                     fs::symlink(&self.bundle_path, destination).await?;
                 }
-            }
-            Err(err) if err.kind() == ErrorKind::NotFound => {}
+            },
+            Err(err) if err.kind() == ErrorKind::NotFound => {},
             Err(err) => return Err(err.into()),
         }
 
@@ -637,10 +667,7 @@ impl Integration for InputMethod {
 
 impl InputMethod {
     // Called from separate process in order to check status of Input Method
-    pub fn finish_input_method_installation(
-        bundle_path: Option<PathBuf>,
-        enable: bool,
-    ) -> Result<(), InputMethodError> {
+    pub fn finish_input_method_installation(bundle_path: Option<PathBuf>) -> Result<(), InputMethodError> {
         let input_method = match bundle_path {
             Some(bundle_path) if bundle_path.is_absolute() => InputMethod { bundle_path },
             Some(_) => return Err(InputMethodError::InvalidBundlePath),
@@ -648,12 +675,6 @@ impl InputMethod {
         };
 
         let source = input_method.input_source()?;
-
-        if enable {
-            source.enable()?;
-            // Verify properties from another process; this snapshot can be stale.
-            return Ok(());
-        }
 
         if !source.is_enabled().unwrap_or_default() {
             return Err(InputMethodError::NotEnabled);
@@ -714,7 +735,8 @@ where
 {
     cfg_if::cfg_if! {
         if #[cfg(feature = "dispatch")] {
-            if unsafe { core_foundation::runloop::CFRunLoopGetCurrent() == core_foundation::runloop::CFRunLoopGetMain() } {
+            let is_main: objc::runtime::BOOL = unsafe { msg_send![class!(NSThread), isMainThread] };
+            if is_main == objc::runtime::YES {
                 work()
             } else {
                 dispatch::Queue::main().exec_sync(work)
@@ -730,9 +752,9 @@ mod tests {
     // Note this useful idiom: importing names from outer (for mod tests) scope.
     use super::*;
 
-    const TEST_INPUT_METHOD_BUNDLE_ID: &str = "io.github.haikbvn.termcomplete.inputmethod.cursor";
+    const TEST_INPUT_METHOD_BUNDLE_ID: &str = "dev.zevu.inputmethod";
     const TEST_INPUT_METHOD_BUNDLE_URL: &str =
-        "/Applications/Termcomplete.app/Contents/Helpers/TermcompleteInputMethod.app";
+        "/Applications/Zevu.app/Contents/Helpers/ZevuInputMethod.app";
 
     fn input_method() -> TISInputSource {
         let key: CFString = unsafe { CFString::wrap_under_create_rule(kTISPropertyBundleID) };
@@ -775,7 +797,7 @@ mod tests {
                     Ok(_) => println!("Uninstalled!"),
                     Err(e) => println!("{e}"),
                 }
-            }
+            },
             None => {
                 println!("No input sources found for {bundle_id}");
                 println!("Installing...");
@@ -783,7 +805,7 @@ mod tests {
                     Ok(_) => println!("Installed!"),
                     Err(e) => println!("{e}"),
                 };
-            }
+            },
         }
     }
 
@@ -800,7 +822,7 @@ mod tests {
                 assert!(!source.is_selected().unwrap_or(true));
                 source.select().ok();
                 assert!(selected == source.is_selected());
-            }
+            },
             Some(false) => {
                 source.deselect().ok();
                 assert!(!source.is_selected().unwrap_or_default());
@@ -808,7 +830,7 @@ mod tests {
                 assert!(source.is_selected().unwrap_or(false));
                 source.deselect().ok();
                 assert!(selected == source.is_selected());
-            }
+            },
 
             None => unreachable!("Is selected should be defined"),
         }
@@ -827,7 +849,7 @@ mod tests {
                 assert!(sources[0].category().unwrap() == "TISCategoryPaletteInputSource");
 
                 println!("{:?}", sources[0]);
-            }
+            },
             None => unreachable!("{} should always exist.", bundle_identifier),
         }
     }

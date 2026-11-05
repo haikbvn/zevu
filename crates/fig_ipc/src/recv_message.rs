@@ -3,8 +3,14 @@ use std::io;
 use async_trait::async_trait;
 use bytes::Buf;
 use fig_proto::prost::Message;
-use fig_proto::{FigMessage, ReflectMessage};
-use tokio::io::{AsyncRead, AsyncReadExt};
+use fig_proto::{
+    FigMessage,
+    ReflectMessage,
+};
+use tokio::io::{
+    AsyncRead,
+    AsyncReadExt,
+};
 
 use crate::BufferedReader;
 use crate::error::RecvError;
@@ -33,7 +39,7 @@ where
                 Ok((len, message)) => {
                     self.buffer.advance(len);
                     return Ok(Some(message.decode()?));
-                }
+                },
                 // If the message is incomplete, read more into the buffer
                 Err(fig_proto::FigMessageParseError::Incomplete(_, _)) => {
                     let bytes = self.inner.read_buf(&mut self.buffer).await?;
@@ -46,14 +52,14 @@ where
                             return Err(RecvError::Io(io::Error::from(io::ErrorKind::UnexpectedEof)));
                         }
                     }
-                }
+                },
                 // On any other error, return the error
                 Err(err) => {
                     // TODO(grant): add resyncing to message boundary
                     let position = cursor.position() as usize;
                     self.buffer.advance(position);
                     return Err(err.into());
-                }
+                },
             }
         }
     }

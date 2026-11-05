@@ -1,5 +1,8 @@
 use objc2_app_kit::NSWorkspace;
-use objc2_foundation::{NSString, NSURL};
+use objc2_foundation::{
+    NSString,
+    NSURL,
+};
 
 #[derive(Debug)]
 pub struct MacOSApplication {
@@ -11,7 +14,10 @@ pub struct MacOSApplication {
 
 impl MacOSApplication {
     pub fn terminate(&self) {
-        use nix::sys::signal::{self, Signal};
+        use nix::sys::signal::{
+            self,
+            Signal,
+        };
         use nix::unistd::Pid;
 
         signal::kill(Pid::from_raw(self.process_identifier), Signal::SIGTERM).ok();
@@ -71,7 +77,7 @@ mod tests {
 // #[test]
 // fn test_terminate() {
 //     // let out = dbg!(running_applications());
-//     running_applications_matching("io.github.haikbvn.termcompletecursor").into_iter().for_each(|app| {
+//     running_applications_matching("com.amazon.codewhisperercursor").into_iter().for_each(|app| {
 //         println!("Terminating {}", app.process_identifier);
 //         app.terminate()
 //     })

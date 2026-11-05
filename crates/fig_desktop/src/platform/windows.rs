@@ -1,36 +1,90 @@
 use std::borrow::Cow;
 use std::ffi::CStr;
 use std::mem::ManuallyDrop;
-use std::sync::{Arc, LazyLock};
+use std::sync::{
+    Arc,
+    LazyLock,
+};
 
 use anyhow::anyhow;
 use parking_lot::Mutex;
 use tao::dpi::Position;
-use tracing::{debug, trace};
-use windows::Win32::Foundation::{HWND, RECT};
+use tracing::{
+    debug,
+    trace,
+};
+use windows::Win32::Foundation::{
+    HWND,
+    RECT,
+};
 use windows::Win32::System::Com::{
-    CLSCTX_INPROC_SERVER, CoCreateInstance, CoInitialize, VARIANT, VARIANT_0, VARIANT_0_0, VARIANT_0_0_0, VT_BOOL,
+    CLSCTX_INPROC_SERVER,
+    CoCreateInstance,
+    CoInitialize,
+    VARIANT,
+    VARIANT_0,
+    VARIANT_0_0,
+    VARIANT_0_0_0,
+    VT_BOOL,
 };
 use windows::Win32::System::ProcessStatus::K32GetProcessImageFileNameA;
-use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+use windows::Win32::System::Threading::{
+    OpenProcess,
+    PROCESS_QUERY_LIMITED_INFORMATION,
+};
 use windows::Win32::UI::Accessibility::{
-    AccessibleObjectFromEvent, CUIAutomation, HWINEVENTHOOK, IUIAutomation, IUIAutomationFocusChangedEventHandler,
-    IUIAutomationFocusChangedEventHandler_Impl, IUIAutomationTextPattern, SetWinEventHook, TextUnit_Character,
-    TreeScope_Descendants, UIA_HasKeyboardFocusPropertyId, UIA_IsTextPatternAvailablePropertyId, UIA_TextPatternId,
+    AccessibleObjectFromEvent,
+    CUIAutomation,
+    HWINEVENTHOOK,
+    IUIAutomation,
+    IUIAutomationFocusChangedEventHandler,
+    IUIAutomationFocusChangedEventHandler_Impl,
+    IUIAutomationTextPattern,
+    SetWinEventHook,
+    TextUnit_Character,
+    TreeScope_Descendants,
+    UIA_HasKeyboardFocusPropertyId,
+    UIA_IsTextPatternAvailablePropertyId,
+    UIA_TextPatternId,
     UnhookWinEvent,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CHILDID_SELF, EVENT_OBJECT_LOCATIONCHANGE, EVENT_SYSTEM_FOREGROUND, GetForegroundWindow, GetWindowThreadProcessId,
-    OBJECT_IDENTIFIER, OBJID_CARET, OBJID_WINDOW, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
+    CHILDID_SELF,
+    EVENT_OBJECT_LOCATIONCHANGE,
+    EVENT_SYSTEM_FOREGROUND,
+    GetForegroundWindow,
+    GetWindowThreadProcessId,
+    OBJECT_IDENTIFIER,
+    OBJID_CARET,
+    OBJID_WINDOW,
+    WINEVENT_OUTOFCONTEXT,
+    WINEVENT_SKIPOWNPROCESS,
 };
 use windows::core::implement;
 
-use crate::event::{Event, RelativeDirection, WindowEvent};
-use crate::platform::{PlatformBoundEvent, PlatformWindow};
-use crate::protocol::icons::{AssetSpecifier, ProcessedAsset};
+use crate::event::{
+    Event,
+    RelativeDirection,
+    WindowEvent,
+};
+use crate::platform::{
+    PlatformBoundEvent,
+    PlatformWindow,
+};
+use crate::protocol::icons::{
+    AssetSpecifier,
+    ProcessedAsset,
+};
 use crate::utils::Rect;
-use crate::webview::{FigWindowMap, WindowId};
-use crate::{AUTOCOMPLETE_ID, EventLoopProxy, EventLoopWindowTarget};
+use crate::webview::{
+    FigWindowMap,
+    WindowId,
+};
+use crate::{
+    AUTOCOMPLETE_ID,
+    EventLoopProxy,
+    EventLoopWindowTarget,
+};
 
 const VT_TRUE: VARIANT = VARIANT {
     Anonymous: VARIANT_0 {
@@ -110,11 +164,11 @@ impl PlatformStateImpl {
                 }
 
                 Ok(())
-            }
+            },
             PlatformBoundEvent::InitializePostRun => {
                 trace!("Ignoring InitializePostRun event");
                 Ok(())
-            }
+            },
             PlatformBoundEvent::EditBufferChanged => unsafe {
                 let console_state = UNMANAGED.lock().console_state;
                 match console_state {
@@ -166,7 +220,7 @@ impl PlatformStateImpl {
                         } else {
                             Err(anyhow!("Failed to acquire caret position"))
                         }
-                    }
+                    },
                     ConsoleState::Accessible { x, y, width, height } => {
                         self.proxy.send_event(Event::WindowEvent {
                             window_id: AUTOCOMPLETE_ID,
@@ -180,17 +234,17 @@ impl PlatformStateImpl {
                         })?;
 
                         Ok(())
-                    }
+                    },
                 }
             },
             PlatformBoundEvent::FullscreenStateUpdated { .. } => {
                 trace!("Ignoring full screen state updated event");
                 Ok(())
-            }
+            },
             PlatformBoundEvent::AccessibilityUpdated { .. } => {
                 trace!("Ignoring accessibility updated event");
                 Ok(())
-            }
+            },
         }
     }
 
@@ -307,7 +361,7 @@ unsafe fn update_focused_state(hwnd: HWND) {
         Err(e) => {
             debug!("Failed to get a handle to a Windows process, it's likely been closed: {e}");
             return;
-        }
+        },
     };
 
     // Get the terminal name
@@ -343,11 +397,11 @@ unsafe fn update_focused_state(hwnd: HWND) {
             .contains(&title) =>
         {
             unmanaged.console_state = ConsoleState::Console { hwnd }
-        }
+        },
         _ => {
             unmanaged.console_state = ConsoleState::None;
             return;
-        }
+        },
     }
 
     unmanaged.location_hook.replace(SetWinEventHook(
@@ -376,7 +430,7 @@ unsafe extern "system" fn win_event_proc(
             && id_child == CHILDID_SELF as i32 =>
         {
             update_focused_state(hwnd)
-        }
+        },
         e if e == EVENT_OBJECT_LOCATIONCHANGE
             && OBJECT_IDENTIFIER(id_object) == OBJID_WINDOW
             && id_child == CHILDID_SELF as i32 =>
@@ -391,7 +445,7 @@ unsafe extern "system" fn win_event_proc(
                     window_event: WindowEvent::Hide,
                 })
                 .ok();
-        }
+        },
         e if e == EVENT_OBJECT_LOCATIONCHANGE && OBJECT_IDENTIFIER(id_object) == OBJID_CARET => {
             let mut acc = None;
             let mut varchild = VARIANT::default();
@@ -414,7 +468,7 @@ unsafe extern "system" fn win_event_proc(
                     }
                 }
             }
-        }
+        },
         _ => (),
     }
 }

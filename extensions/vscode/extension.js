@@ -1,37 +1,42 @@
 const vscode = require("vscode");
 const cp = require("child_process");
+const path = require("path");
 
-let runCommand = function (command) {
-  cp.exec(command, (err) => {
-    if (err) {
-      logError(err);
-    }
-  });
-};
+const DEFAULT_CLI_PATH = "/Applications/Zevu.app/Contents/MacOS/zevu";
+let extensionDisposable;
 
-let config = vscode.workspace.getConfiguration();
-// fig.log is an internal setting as it's intended for developers only, this means it won't show up
-// in the settings UI/editor. Add `"fig.log": true` to your settings.json and reload the window to
-// enable logging.
-let shouldLog = config.get("q.log") === true;
-
-// Ensure that any VSCode terminal session has Q_NEW_SESSION set as an environment variable
-let osxEnv = config.get("terminal.integrated.env.osx");
-osxEnv["Q_NEW_SESSION"] = "1";
-config.update("terminal.integrated.env.osx", osxEnv, true);
+function runFocusHook(pid) {
+  const cliPath = vscode.workspace
+    .getConfiguration("zevu")
+    .get("cliPath", DEFAULT_CLI_PATH);
+  if (!path.isAbsolute(cliPath)) {
+    logError("zevu.cliPath must be an absolute path to the Zevu CLI");
+    return;
+  }
+  cp.execFile(
+    cliPath,
+    ["hook", "keyboard-focus-changed", vscode.env.uriScheme, String(pid)],
+    (err) => {
+      if (err) {
+        logError(err);
+      }
+    },
+  );
+}
 
 function log(...args) {
-  if (shouldLog) {
-    console.log(`q: ${args[0]}`, args.slice(1));
+  // zevu.log is an internal developer setting, not shown in the settings editor.
+  if (vscode.workspace.getConfiguration("zevu").get("log") === true) {
+    console.log(`zevu: ${args[0]}`, args.slice(1));
   }
 }
 
 function logError(message) {
-  console.error(`q: ${message}`);
+  console.error(`zevu: ${message}`);
 }
 
 function updateActiveTerminal(terminal) {
-  let activeTerminal = terminal || vscode.window.activeTerminal;
+  const activeTerminal = terminal || vscode.window.activeTerminal;
 
   if (!activeTerminal) {
     noActiveTerminals();
@@ -39,9 +44,7 @@ function updateActiveTerminal(terminal) {
   }
   activeTerminal.processId.then((processId) => {
     if (processId) {
-      runCommand(
-        `q hook keyboard-focus-changed ${vscode.env.uriScheme} ${processId}`,
-      );
+      runFocusHook(processId);
     }
   });
 }
@@ -50,41 +53,44 @@ function noActiveTerminals() {
   log("no active terminals");
 }
 
-console.log(vscode.env.uriScheme);
+function activate(context) {
+  const environment = context.environmentVariableCollection;
+  environment.persistent = false;
+  environment.replace("Q_NEW_SESSION", "1");
 
-function activate() {
-  try {
-    updateActiveTerminal();
-
+  extensionDisposable = vscode.Disposable.from(
+    new vscode.Disposable(() => environment.clear()),
     vscode.window.onDidOpenTerminal(() => {
       log("Terminal opened. Total count: " + vscode.window.terminals.length);
-    });
-
+    }),
     vscode.window.onDidCloseTerminal(() => {
       log("Terminal closed. Total count: " + vscode.window.terminals.length);
 
-      if (vscode.window.terminals.length == 0) {
+      if (vscode.window.terminals.length === 0) {
         noActiveTerminals();
       } else {
         updateActiveTerminal();
       }
-    });
-
+    }),
     vscode.window.onDidChangeActiveTerminal((terminal) => {
-      log(`Active terminal changed`);
+      log("Active terminal changed");
       updateActiveTerminal(terminal);
-    });
-
+    }),
+    vscode.window.onDidChangeActiveTextEditor(() => {
+      runFocusHook(0);
+    }),
     vscode.window.onDidChangeTextEditorSelection(() => {
-      runCommand(`q hook keyboard-focus-changed ${vscode.env.uriScheme} 0`);
-    });
-  } catch (e) {
-    logError(e);
-  }
+      runFocusHook(0);
+    }),
+  );
+  context.subscriptions.push(extensionDisposable);
+  updateActiveTerminal();
 }
-exports.activate = activate;
 
-function deactivate() {}
+function deactivate() {
+  extensionDisposable?.dispose();
+  extensionDisposable = undefined;
+}
 
 module.exports = {
   activate,

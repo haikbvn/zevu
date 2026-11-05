@@ -1,10 +1,13 @@
 use std::process::ExitCode;
 
 use clap::Subcommand;
-use eyre::{Result, WrapErr};
+use eyre::{
+    Result,
+    WrapErr,
+};
 use fig_ipc::local::send_hook_to_socket;
 use fig_proto::hooks;
-use fig_util::env_var::TCOMP_PTY_SESSION_ID;
+use fig_util::env_var::QTERM_SESSION_ID;
 
 #[derive(Debug, PartialEq, Eq, Subcommand)]
 #[command(hide = true)]
@@ -38,14 +41,6 @@ pub enum HookSubcommand {
         pid: i32,
         tty: String,
     },
-    Ssh {
-        pid: i32,
-        tty: String,
-        control_path: String,
-        remote_dest: String,
-        #[arg(long)]
-        prompt: bool,
-    },
     ClearAutocompleteCache {
         #[arg(long)]
         cli: Vec<String>,
@@ -62,7 +57,7 @@ impl HookSubcommand {
     }
 
     pub async fn execute_hook(&self) -> Result<()> {
-        let session_id = std::env::var(TCOMP_PTY_SESSION_ID).ok();
+        let session_id = std::env::var(QTERM_SESSION_ID).ok();
 
         let hook = match self {
             HookSubcommand::Editbuffer {
@@ -76,12 +71,12 @@ impl HookSubcommand {
             } => {
                 let context = hooks::generate_shell_context(*pid, tty, Some(session_id.clone()))?;
                 Ok(hooks::new_edit_buffer_hook(context, text, *histno, *cursor, None))
-            }
+            },
             HookSubcommand::Hide => Ok(hooks::new_hide_hook()),
             HookSubcommand::Init { pid, tty } => {
                 let context = hooks::generate_shell_context(*pid, tty, session_id)?;
                 hooks::new_init_hook(context)
-            }
+            },
             HookSubcommand::IntegrationReady { integration } => Ok(hooks::new_integration_ready_hook(integration)),
             HookSubcommand::KeyboardFocusChanged {
                 app_identifier,
@@ -93,21 +88,11 @@ impl HookSubcommand {
             HookSubcommand::PreExec { pid, tty } => {
                 let context = hooks::generate_shell_context(*pid, tty, session_id)?;
                 Ok(hooks::new_preexec_hook(context))
-            }
+            },
             HookSubcommand::Prompt { pid, tty } => {
                 let context = hooks::generate_shell_context(*pid, tty, session_id)?;
                 Ok(hooks::new_prompt_hook(context))
-            }
-            HookSubcommand::Ssh {
-                control_path,
-                pid,
-                tty,
-                remote_dest,
-                ..
-            } => {
-                let context = hooks::generate_shell_context(*pid, tty, session_id)?;
-                hooks::new_ssh_hook(context, control_path, remote_dest)
-            }
+            },
             HookSubcommand::ClearAutocompleteCache { cli } => Ok(hooks::new_clear_autocomplete_cache(cli.clone())),
         };
 

@@ -3,23 +3,19 @@
   "ui": "tui",
   "tasks": {
     "build": {
-      "dependsOn": [
-        "^build"
-      ],
-      "outputs": [
-        "dist"
-      ]
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    },
+    "zevu-terminal-companion#build": {
+      "outputs": ["zevu-terminal-companion-0.2.0.vsix"],
+      "cache": false
     },
     "lint": {
-      "dependsOn": [
-        "@amzn/eslint-config#build"
-      ],
+      "dependsOn": ["@amzn/eslint-config#build"],
       "cache": false
     },
     "lint:fix": {
-      "dependsOn": [
-        "@amzn/eslint-config#build"
-      ],
+      "dependsOn": ["@amzn/eslint-config#build"],
       "cache": false
     },
     "clean": {
@@ -29,10 +25,5 @@
       "cache": false,
       "persistent": true
     }
-  },
-  "globalPassThroughEnv": [
-    "BUF_CACHE_DIR",
-    "COREPACK_HOME",
-    "TCOMP_TOOLS_DIR"
-  ]
+  }
 }

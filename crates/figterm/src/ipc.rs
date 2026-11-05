@@ -2,25 +2,64 @@
 
 use std::io;
 use std::pin::Pin;
-use std::task::{Context, Poll};
+use std::task::{
+    Context,
+    Poll,
+};
 use std::time::Duration;
 
 use anyhow::Result;
-use fig_ipc::{BufferedReader, RecvMessage, SendMessage};
+use fig_ipc::{
+    BufferedReader,
+    RecvMessage,
+    SendMessage,
+};
 use fig_proto::FigProtobufEncodable;
-use fig_proto::figterm::{FigtermRequestMessage, FigtermResponseMessage};
+use fig_proto::figterm::{
+    FigtermRequestMessage,
+    FigtermResponseMessage,
+};
 use fig_proto::remote::hostbound::Handshake;
-use fig_proto::remote::{Clientbound, Hostbound, clientbound, hostbound};
-use fig_util::{PTY_BINARY_NAME, directories, gen_hex_string};
-use flume::{Receiver, Sender, unbounded};
+use fig_proto::remote::{
+    Clientbound,
+    Hostbound,
+    clientbound,
+    hostbound,
+};
+use fig_util::{
+    PTY_BINARY_NAME,
+    directories,
+    gen_hex_string,
+};
+use flume::{
+    Receiver,
+    Sender,
+    unbounded,
+};
 use pin_project::pin_project;
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf};
+use tokio::io::{
+    AsyncRead,
+    AsyncWrite,
+    AsyncWriteExt,
+    ReadBuf,
+};
 use tokio::join;
-use tokio::process::{ChildStdin, ChildStdout};
+use tokio::process::{
+    ChildStdin,
+    ChildStdout,
+};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
-use tokio::time::{MissedTickBehavior, interval};
-use tracing::{debug, error, info, trace};
+use tokio::time::{
+    MissedTickBehavior,
+    interval,
+};
+use tracing::{
+    debug,
+    error,
+    info,
+    trace,
+};
 
 use crate::MainLoopEvent;
 
@@ -155,15 +194,15 @@ pub async fn spawn_figterm_ipc(
                                         .send_async((message, response_tx.clone()))
                                         .await
                                         .unwrap();
-                                }
+                                },
                                 Ok(None) => {
                                     debug!("Received EOF");
                                     break;
-                                }
+                                },
                                 Err(err) => {
                                     error!("Error receiving message: {err}");
                                     break;
-                                }
+                                },
                             }
                         }
                     });
@@ -198,10 +237,9 @@ pub async fn spawn_figterm_ipc(
     Ok(incoming_rx)
 }
 
-/// Connects to the desktop app and allows for a remote connection from remote hosts
+/// Connects the local PTY session to the desktop over its Unix socket.
 pub async fn spawn_remote_ipc(
     session_id: String,
-    parent_id: Option<String>,
     main_loop_sender: Sender<MainLoopEvent>,
 ) -> Result<(Sender<Hostbound>, Receiver<Clientbound>, oneshot::Sender<()>)> {
     let (stop_ipc_tx, mut stop_ipc_rx) = oneshot::channel::<()>();
@@ -233,7 +271,7 @@ pub async fn spawn_remote_ipc(
                     if let Err(err) = writer.send_message(Hostbound {
                         packet: Some(hostbound::Packet::Handshake(Handshake {
                             id: session_id.clone(),
-                            parent_id: parent_id.clone(),
+                            parent_id: None,
                             secret: secret.clone(),
                         })),
                     })
@@ -262,6 +300,7 @@ pub async fn spawn_remote_ipc(
                     // send outgoing messages
                     outgoing_rx.drain();
                     let outgoing_rx = outgoing_rx.clone();
+                    let incoming_main_loop_sender = main_loop_sender.clone();
                     let main_loop_sender = main_loop_sender.clone();
                     let outgoing_task = tokio::spawn(async move {
                         while let Ok(message) = outgoing_rx.recv_async().await {
@@ -311,6 +350,9 @@ pub async fn spawn_remote_ipc(
                                 break;
                             }
                         }
+                        // EOF means there is no desktop to handle intercepted keys.
+                        // Release them now, not after the next key triggers a failed write.
+                        incoming_main_loop_sender.send(MainLoopEvent::UnlockInterception).ok();
                         debug!("incoming_task exited");
                     });
 

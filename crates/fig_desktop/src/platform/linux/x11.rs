@@ -5,22 +5,49 @@ use dashmap::DashMap;
 use fig_util::linux::DESKTOP_APP_WM_CLASS;
 use parking_lot::Mutex;
 use serde::Serialize;
-use tao::dpi::{PhysicalPosition, PhysicalSize};
-use tracing::{debug, error, trace};
+use tao::dpi::{
+    PhysicalPosition,
+    PhysicalSize,
+};
+use tracing::{
+    debug,
+    error,
+    trace,
+};
 use x11rb::connection::Connection;
 use x11rb::properties::WmClass;
 use x11rb::protocol::Event as X11Event;
 use x11rb::protocol::xproto::{
-    Atom, AtomEnum, ChangeWindowAttributesAux, EventMask, GetGeometryReply, Property, PropertyNotifyEvent, Window,
-    change_window_attributes, get_atom_name, get_geometry, get_input_focus, get_property, intern_atom, query_tree,
+    Atom,
+    AtomEnum,
+    ChangeWindowAttributesAux,
+    EventMask,
+    GetGeometryReply,
+    Property,
+    PropertyNotifyEvent,
+    Window,
+    change_window_attributes,
+    get_atom_name,
+    get_geometry,
+    get_input_focus,
+    get_property,
+    intern_atom,
+    query_tree,
 };
 use x11rb::rust_connection::RustConnection;
 
 use super::integrations::WM_CLASS_ALLOWLIST;
-use super::{PlatformStateImpl, WM_REVICED_DATA};
+use super::{
+    PlatformStateImpl,
+    WM_REVICED_DATA,
+};
 use crate::event::WindowEvent;
 use crate::utils::Rect;
-use crate::{AUTOCOMPLETE_ID, Event, EventLoopProxy};
+use crate::{
+    AUTOCOMPLETE_ID,
+    Event,
+    EventLoopProxy,
+};
 
 const WM_WINDOW_ROLE: &[u8] = b"WM_WINDOW_ROLE";
 
@@ -41,7 +68,7 @@ impl X11State {
                 let name = get_atom_name(conn, atom)?.reply()?.name;
                 self.atom_cache_a2b.insert(atom, name.clone());
                 Ok(name)
-            }
+            },
         }
     }
 
@@ -52,7 +79,7 @@ impl X11State {
                 let atom = intern_atom(conn, false, name)?.reply()?.atom;
                 self.atom_cache_b2a.insert(name.to_vec(), atom);
                 Ok(atom)
-            }
+            },
         }
     }
 }
@@ -79,14 +106,10 @@ pub(super) async fn handle_x11(
 
     let screen = &setup.roots[screen_num];
 
-    change_window_attributes(
-        &conn,
-        screen.root,
-        &ChangeWindowAttributesAux {
-            event_mask: Some(EventMask::PROPERTY_CHANGE),
-            ..Default::default()
-        },
-    )
+    change_window_attributes(&conn, screen.root, &ChangeWindowAttributesAux {
+        event_mask: Some(EventMask::PROPERTY_CHANGE),
+        ..Default::default()
+    })
     .expect("Failed sending event mask update")
     .check()
     .expect("Failed changing event mask");
@@ -151,12 +174,12 @@ fn process_window(
                 debug!("No wm class");
                 hide()?;
                 return Ok(());
-            }
+            },
             Err(err) => {
                 debug!("Error getting wm class: {err:?}");
                 hide()?;
                 return Ok(());
-            }
+            },
         })
         .to_string();
 

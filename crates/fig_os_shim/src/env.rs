@@ -1,9 +1,18 @@
 use std::collections::HashMap;
-use std::env::{self, VarError};
-use std::ffi::{OsStr, OsString};
+use std::env::{
+    self,
+    VarError,
+};
+use std::ffi::{
+    OsStr,
+    OsString,
+};
 use std::io;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc,
+    Mutex,
+};
 
 use crate::Shim;
 #[derive(Debug, Clone, Default)]
@@ -12,7 +21,10 @@ pub struct Env(inner::Inner);
 mod inner {
     use std::collections::HashMap;
     use std::path::PathBuf;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{
+        Arc,
+        Mutex,
+    };
 
     #[derive(Debug, Clone, Default)]
     pub(super) enum Inner {
@@ -140,11 +152,11 @@ impl Env {
     }
 
     pub fn in_codespaces(&self) -> bool {
-        self.get_os("CODESPACES").is_some() || self.get_os("TCOMP_CODESPACES").is_some()
+        self.get_os("CODESPACES").is_some() || self.get_os("Q_CODESPACES").is_some()
     }
 
     pub fn in_ci(&self) -> bool {
-        self.get_os("CI").is_some() || self.get_os("TCOMP_CI").is_some()
+        self.get_os("CI").is_some() || self.get_os("Q_CI").is_some()
     }
 
     /// Whether or not the current executable is run from an AppImage.
@@ -156,76 +168,75 @@ impl Env {
 
     // Q-specific environment variable methods
     pub fn q_fake_is_remote(&self) -> bool {
-        self.get_os("TCOMP_FAKE_IS_REMOTE").is_some()
+        self.get_os("Q_FAKE_IS_REMOTE").is_some()
     }
 
     pub fn q_log_level(&self) -> Result<String, VarError> {
-        self.get("TCOMP_LOG_LEVEL")
+        self.get("Q_LOG_LEVEL")
     }
 
     pub fn q_log_stdout(&self) -> bool {
-        self.get_os("TCOMP_LOG_STDOUT").is_some()
+        self.get_os("Q_LOG_STDOUT").is_some()
     }
 
     pub fn amazon_q_sigv4(&self) -> bool {
-        self.get("TCOMP_SIGV4").is_ok_and(|v| !v.is_empty())
+        self.get("AMAZON_Q_SIGV4").is_ok_and(|v| !v.is_empty())
     }
 
     pub fn amazon_q_chat_shell(&self) -> String {
-        self.get("TCOMP_CHAT_SHELL")
-            .unwrap_or_else(|_| "bash".to_string())
+        self.get("AMAZON_Q_CHAT_SHELL").unwrap_or_else(|_| "bash".to_string())
     }
 
     pub fn q_cli_client_application(&self) -> Result<String, VarError> {
-        self.get("TCOMP_CLI_CLIENT_APPLICATION")
+        self.get("Q_CLI_CLIENT_APPLICATION")
     }
 
     pub fn q_parent(&self) -> Result<String, VarError> {
-        self.get("TCOMP_PARENT")
+        self.get("Q_PARENT")
     }
 
     pub fn q_term(&self) -> Result<String, VarError> {
-        self.get("TCOMP_TERM")
+        self.get("Q_TERM")
     }
 
     pub fn q_using_zsh_autosuggestions(&self) -> bool {
-        self.get_os("TCOMP_USING_ZSH_AUTOSUGGESTIONS").is_some()
+        self.get_os("Q_USING_ZSH_AUTOSUGGESTIONS").is_some()
     }
 
     pub fn q_init_snapshot_test(&self) -> bool {
-        self.get_os("TCOMP_INIT_SNAPSHOT_TEST").is_some()
+        self.get_os("Q_INIT_SNAPSHOT_TEST").is_some()
     }
 
     pub fn q_desktop_release_url(&self) -> Result<String, VarError> {
-        self.get("TCOMP_DESKTOP_RELEASE_URL")
+        self.get("Q_DESKTOP_RELEASE_URL")
     }
 
     pub fn q_inline_shell_completion_cache_enabled(&self) -> bool {
-        self.get_os("TCOMP_INLINE_SHELL_COMPLETION_CACHE_DISABLE").is_none()
+        self.get_os("Q_INLINE_SHELL_COMPLETION_CACHE_DISABLE").is_none()
     }
 
     pub fn q_inline_shell_completion_history_count(&self) -> Result<String, VarError> {
-        self.get("TCOMP_INLINE_SHELL_COMPLETION_HISTORY_COUNT")
+        self.get("Q_INLINE_SHELL_COMPLETION_HISTORY_COUNT")
     }
 
     pub fn q_inline_shell_completion_debounce_ms(&self) -> Result<String, VarError> {
-        self.get("TCOMP_INLINE_SHELL_COMPLETION_DEBOUNCE_MS")
+        self.get("Q_INLINE_SHELL_COMPLETION_DEBOUNCE_MS")
     }
 
     pub fn q_backend(&self) -> Result<String, VarError> {
-        self.get("TCOMP_BACKEND")
+        self.get("Q_BACKEND")
     }
 
     pub fn q_prompt_offset_workaround(&self) -> Result<String, VarError> {
-        self.get("TCOMP_PROMPT_OFFSET_WORKAROUND")
+        self.get("Q_PROMPT_OFFSET_WORKAROUND")
     }
 
     pub fn q_use_sendmessage(&self) -> bool {
-        self.get("TCOMP_USE_SENDMESSAGE").is_ok_and(|v| !v.is_empty())
+        self.get("Q_USE_SENDMESSAGE").is_ok_and(|v| !v.is_empty())
     }
 
     pub fn q_custom_cert(&self) -> Result<String, VarError> {
-        self.get("TCOMP_CUSTOM_CERT")
+        self.get("Q_CUSTOM_CERT")
     }
 
     pub fn has_q_parent(&self) -> bool {

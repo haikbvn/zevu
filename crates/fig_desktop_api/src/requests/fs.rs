@@ -1,15 +1,30 @@
 use camino::Utf8PathBuf;
-use fig_os_shim::{Env, Fs};
+use fig_os_shim::{
+    Env,
+    Fs,
+};
 use fig_proto::fig::server_originated_message::Submessage as ServerOriginatedSubMessage;
 use fig_proto::fig::{
-    AppendToFileRequest, ContentsOfDirectoryRequest, ContentsOfDirectoryResponse, DestinationOfSymbolicLinkRequest,
-    DestinationOfSymbolicLinkResponse, ReadFileRequest, ReadFileResponse, WriteFileRequest,
+    AppendToFileRequest,
+    ContentsOfDirectoryRequest,
+    ContentsOfDirectoryResponse,
+    DestinationOfSymbolicLinkRequest,
+    DestinationOfSymbolicLinkResponse,
+    ReadFileRequest,
+    ReadFileResponse,
+    WriteFileRequest,
 };
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 
-use super::{RequestResult, RequestResultImpl};
-use crate::util::{build_filepath, resolve_filepath};
+use super::{
+    RequestResult,
+    RequestResultImpl,
+};
+use crate::util::{
+    build_filepath,
+    resolve_filepath,
+};
 
 pub async fn read_file(request: ReadFileRequest, env: &Env, fs: &Fs) -> RequestResult {
     use fig_proto::fig::read_file_response::Type;
@@ -136,7 +151,11 @@ pub async fn create_directory_request(
 #[cfg(test)]
 mod tests {
     use camino::Utf8PathBuf;
-    use fig_proto::fig::{FilePath, ReadFileRequest, WriteFileRequest};
+    use fig_proto::fig::{
+        FilePath,
+        ReadFileRequest,
+        WriteFileRequest,
+    };
 
     use super::*;
 

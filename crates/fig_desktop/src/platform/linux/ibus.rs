@@ -7,16 +7,36 @@ use dbus::connect_to_ibus_daemon;
 use fig_os_shim::Context;
 use fig_proto::local::caret_position_hook::Origin;
 use fig_util::terminal::PositioningKind;
-use tao::dpi::{LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize, Position, Size};
-use tracing::{debug, error};
+use tao::dpi::{
+    LogicalPosition,
+    LogicalSize,
+    PhysicalPosition,
+    PhysicalSize,
+    Position,
+    Size,
+};
+use tracing::{
+    debug,
+    error,
+};
 use zbus::export::futures_util::TryStreamExt;
 use zbus::fdo::DBusProxy;
-use zbus::{MatchRule, MessageStream};
+use zbus::{
+    MatchRule,
+    MessageStream,
+};
 
 use super::PlatformStateImpl;
-use crate::event::{Event, WindowEvent, WindowPosition};
+use crate::event::{
+    Event,
+    WindowEvent,
+    WindowPosition,
+};
 use crate::platform::ActiveWindowData;
-use crate::{AUTOCOMPLETE_ID, EventLoopProxy};
+use crate::{
+    AUTOCOMPLETE_ID,
+    EventLoopProxy,
+};
 
 /// Connects to the `ibus-daemon` D-Bus service if not already connected, launching a task to
 /// continually listen on InputContext signals.
@@ -54,11 +74,11 @@ pub async fn launch_ibus_connection(proxy: EventLoopProxy, platform_state: Arc<P
                                 "FocusIn" => {
                                     debug!("FocusIn on {}", path.as_str());
                                     active_input_contexts.insert(path.as_str().to_owned());
-                                }
+                                },
                                 "FocusOut" => {
                                     debug!("FocusOut on {}", path.as_str());
                                     active_input_contexts.remove(path.as_str());
-                                }
+                                },
                                 "SetCursorLocation" => {
                                     if !active_input_contexts.contains(path.as_str())
                                         || platform_state.active_terminal.lock().is_none()
@@ -72,7 +92,7 @@ pub async fn launch_ibus_connection(proxy: EventLoopProxy, platform_state: Arc<P
                                         Err(err) => {
                                             error!(%err, "Failed deserializing message body");
                                             continue;
-                                        }
+                                        },
                                     };
                                     if body == (0, 0, 0, 0) {
                                         debug!("null SetCursorLocation on {}", path.as_str());
@@ -117,7 +137,7 @@ pub async fn launch_ibus_connection(proxy: EventLoopProxy, platform_state: Arc<P
                                             })
                                             .unwrap();
                                     }
-                                }
+                                },
                                 "SetCursorLocationRelative" => {
                                     if !active_input_contexts.contains(path.as_str()) {
                                         debug!("SetCursorLocationRelative rejected on {}", path.as_str());
@@ -128,7 +148,7 @@ pub async fn launch_ibus_connection(proxy: EventLoopProxy, platform_state: Arc<P
                                         Err(err) => {
                                             error!(%err, "Failed deserializing message body");
                                             continue;
-                                        }
+                                        },
                                     };
                                     debug!(
                                         "SetCursorLocationRelative{{x: {}, y: {}, h: {}}} on {}",
@@ -178,22 +198,22 @@ pub async fn launch_ibus_connection(proxy: EventLoopProxy, platform_state: Arc<P
                                             },
                                         })
                                         .unwrap();
-                                }
-                                _ => {}
+                                },
+                                _ => {},
                             }
                         }
                     }
-                }
+                },
                 Ok(None) => {
                     debug!("Received end from ibus");
                     platform_state.ibus_connected.store(false, Ordering::SeqCst);
                     break;
-                }
+                },
                 Err(err) => {
                     error!(%err, "Failed receiving message from stream");
                     platform_state.ibus_connected.store(false, Ordering::SeqCst);
                     break;
-                }
+                },
             }
         }
     });

@@ -12,61 +12,61 @@ export TTY
 
 export SHELL_PID="$$"
 
-TCOMP_LAST_PS1="$PS1"
-TCOMP_LAST_PS2="$PS2"
-TCOMP_LAST_PS3="$PS3"
+Q_LAST_PS1="$PS1"
+Q_LAST_PS2="$PS2"
+Q_LAST_PS3="$PS3"
 
-if [[ -z "${TCOMP_SHELL:-}" ]]; then
-  TCOMP_SHELL=$({{CLI_BINARY_NAME}} _ get-shell)
+if [[ -z "${Q_SHELL:-}" ]]; then
+  Q_SHELL=$({{CLI_BINARY_NAME}} _ get-shell)
 fi
 
 # Construct Operating System Command.
 # shellcheck disable=SC2059
-function tcomp_osc { printf "\033]697;$1\007" "${@:2}"; }
+function fig_osc { printf "\033]697;$1\007" "${@:2}"; }
 
-function __tcomp_preexec() {
-  tcomp_osc "OSCLock=%s" "${TCOMP_PTY_SESSION_ID}"
-  tcomp_osc PreExec
+function __fig_preexec() {
+  fig_osc "OSCLock=%s" "${QTERM_SESSION_ID}"
+  fig_osc PreExec
 
   # Reset user prompts before executing a command, but only if it hasn't
   # changed since we last set it.
-  if [[ -n "${TCOMP_USER_PS1+x}" && "${PS1}" = "${TCOMP_LAST_PS1}" ]]; then
-    TCOMP_LAST_PS1="${TCOMP_USER_PS1}"
-    PS1="${TCOMP_USER_PS1}"
+  if [[ -n "${Q_USER_PS1+x}" && "${PS1}" = "${Q_LAST_PS1}" ]]; then
+    Q_LAST_PS1="${Q_USER_PS1}"
+    PS1="${Q_USER_PS1}"
   fi
-  if [[ -n "${TCOMP_USER_PS2+x}" && "${PS2}" = "${TCOMP_LAST_PS2}" ]]; then
-    TCOMP_LAST_PS2="${TCOMP_USER_PS2}"
-    PS2="${TCOMP_USER_PS2}"
+  if [[ -n "${Q_USER_PS2+x}" && "${PS2}" = "${Q_LAST_PS2}" ]]; then
+    Q_LAST_PS2="${Q_USER_PS2}"
+    PS2="${Q_USER_PS2}"
   fi
-  if [[ -n "${TCOMP_USER_PS3+x}" && "${PS3}" = "${TCOMP_LAST_PS3}" ]]; then
-    TCOMP_LAST_PS3="${TCOMP_USER_PS3}"
-    PS3="${TCOMP_USER_PS3}"
+  if [[ -n "${Q_USER_PS3+x}" && "${PS3}" = "${Q_LAST_PS3}" ]]; then
+    Q_LAST_PS3="${Q_USER_PS3}"
+    PS3="${Q_USER_PS3}"
   fi
 
-  _tcomp_done_preexec="yes"
+  _fig_done_preexec="yes"
 }
 
-function __tcomp_preexec_preserve_status() {
-  __tcomp_ret_value="$?"
-  __tcomp_preexec "$@"
-  __bp_set_ret_value "${__tcomp_ret_value}" "${__bp_last_argument_prev_command:?}"
+function __fig_preexec_preserve_status() {
+  __fig_ret_value="$?"
+  __fig_preexec "$@"
+  __bp_set_ret_value "${__fig_ret_value}" "${__bp_last_argument_prev_command:?}"
 }
 
-function __tcomp_pre_prompt () {
-  __tcomp_ret_value="$?"
+function __fig_pre_prompt () {
+  __fig_ret_value="$?"
 
-  tcomp_osc "OSCUnlock=%s" "${TCOMP_PTY_SESSION_ID}"
-  tcomp_osc "Dir=%s" "${PWD}"
-  tcomp_osc "Shell=bash"
-  tcomp_osc "ShellPath=%s" "${TCOMP_SHELL:-$SHELL}"
+  fig_osc "OSCUnlock=%s" "${QTERM_SESSION_ID}"
+  fig_osc "Dir=%s" "${PWD}"
+  fig_osc "Shell=bash"
+  fig_osc "ShellPath=%s" "${Q_SHELL:-$SHELL}"
   if [[ -n "${WSL_DISTRO_NAME}" ]]; then
-    tcomp_osc "WSLDistro=%s" "${WSL_DISTRO_NAME}"
+    fig_osc "WSLDistro=%s" "${WSL_DISTRO_NAME}"
   fi
-  tcomp_osc "PID=%d" "$$"
-  tcomp_osc "ExitCode=%s" "$__tcomp_ret_value"
-  tcomp_osc "TTY=%s" "${TTY}"
-  tcomp_osc "Log=%s" "${TCOMP_LOG_LEVEL}"
-  tcomp_osc "User=%s" "${USER:-root}"
+  fig_osc "PID=%d" "$$"
+  fig_osc "ExitCode=%s" "$__fig_ret_value"
+  fig_osc "TTY=%s" "${TTY}"
+  fig_osc "Log=%s" "${Q_LOG_LEVEL}"
+  fig_osc "User=%s" "${USER:-root}"
 
   if command -v {{CLI_BINARY_NAME}} >/dev/null 2>&1; then
     (command {{CLI_BINARY_NAME}} _ pre-cmd --alias "$(\alias)" > /dev/null 2>&1 &) >/dev/null 2>&1
@@ -74,61 +74,61 @@ function __tcomp_pre_prompt () {
 
   # Work around bug in CentOS 7.2 where preexec doesn't run if you press ^C
   # while entering a command.
-  [[ -z "${_tcomp_done_preexec:-}" ]] && __tcomp_preexec ""
-  _tcomp_done_preexec=""
+  [[ -z "${_fig_done_preexec:-}" ]] && __fig_preexec ""
+  _fig_done_preexec=""
 
   # Reset $?
-  __bp_set_ret_value "${__tcomp_ret_value}" "${__bp_last_argument_prev_command}"
+  __bp_set_ret_value "${__fig_ret_value}" "${__bp_last_argument_prev_command}"
 }
 
-function __tcomp_post_prompt () {
-  __tcomp_ret_value="$?"
+function __fig_post_prompt () {
+  __fig_ret_value="$?"
 
-  __tcomp_reset_hooks
+  __fig_reset_hooks
 
-  # If TCOMP_USER_PSx is undefined or PSx changed by user, update TCOMP_USER_PSx.
-  if [[ -z "${TCOMP_USER_PS1+x}" || "${PS1}" != "${TCOMP_LAST_PS1}" ]]; then
-    TCOMP_USER_PS1="${PS1}"
+  # If Q_USER_PSx is undefined or PSx changed by user, update Q_USER_PSx.
+  if [[ -z "${Q_USER_PS1+x}" || "${PS1}" != "${Q_LAST_PS1}" ]]; then
+    Q_USER_PS1="${PS1}"
   fi
-  if [[ -z "${TCOMP_USER_PS2+x}" || "${PS2}" != "${TCOMP_LAST_PS2}" ]]; then
-    TCOMP_USER_PS2="${PS2}"
+  if [[ -z "${Q_USER_PS2+x}" || "${PS2}" != "${Q_LAST_PS2}" ]]; then
+    Q_USER_PS2="${PS2}"
   fi
-  if [[ -z "${TCOMP_USER_PS3+x}" || "${PS3}" != "${TCOMP_LAST_PS3}" ]]; then
-    TCOMP_USER_PS3="${PS3}"
+  if [[ -z "${Q_USER_PS3+x}" || "${PS3}" != "${Q_LAST_PS3}" ]]; then
+    Q_USER_PS3="${PS3}"
   fi
 
-  START_PROMPT="\[$(tcomp_osc StartPrompt)\]"
-  END_PROMPT="\[$(tcomp_osc EndPrompt)\]"
+  START_PROMPT="\[$(fig_osc StartPrompt)\]"
+  END_PROMPT="\[$(fig_osc EndPrompt)\]"
   # shellcheck disable=SC2086
   # it's already double quoted, dummy
-  NEW_CMD="\[$(tcomp_osc NewCmd=${TCOMP_PTY_SESSION_ID})\]"
+  NEW_CMD="\[$(fig_osc NewCmd=${QTERM_SESSION_ID})\]"
 
-  # Reset $? first in case it's used in $TCOMP_USER_PSx.
-  __bp_set_ret_value "${__tcomp_ret_value}" "${__bp_last_argument_prev_command}"
-  PS1="${START_PROMPT}${TCOMP_USER_PS1}${END_PROMPT}${NEW_CMD}"
-  PS2="${START_PROMPT}${TCOMP_USER_PS2}${END_PROMPT}"
-  PS3="${START_PROMPT}${TCOMP_USER_PS3}${END_PROMPT}${NEW_CMD}"
+  # Reset $? first in case it's used in $Q_USER_PSx.
+  __bp_set_ret_value "${__fig_ret_value}" "${__bp_last_argument_prev_command}"
+  PS1="${START_PROMPT}${Q_USER_PS1}${END_PROMPT}${NEW_CMD}"
+  PS2="${START_PROMPT}${Q_USER_PS2}${END_PROMPT}"
+  PS3="${START_PROMPT}${Q_USER_PS3}${END_PROMPT}${NEW_CMD}"
 
-  TCOMP_LAST_PS1="${PS1}"
-  TCOMP_LAST_PS2="${PS2}"
-  TCOMP_LAST_PS3="${PS3}"
+  Q_LAST_PS1="${PS1}"
+  Q_LAST_PS2="${PS2}"
+  Q_LAST_PS3="${PS3}"
 }
 
-__tcomp_reset_hooks() {
+__fig_reset_hooks() {
   # Rely on PROMPT_COMMAND instead of precmd_functions because precmd_functions
   # are all run before PROMPT_COMMAND.
   # Set PROMPT_COMMAND to "[
-  #   __tcomp_pre_prompt,
+  #   __fig_pre_prompt,
   #   ...precmd_functions,
   #   ORIGINAL_PROMPT_COMMAND,
-  #   __tcomp_post_prompt,
+  #   __fig_post_prompt,
   #   __bp_interactive_mode
   # ]"
   local existing_prompt_command
   # shellcheck disable=SC2128
   existing_prompt_command="${PROMPT_COMMAND}"
-  existing_prompt_command="${existing_prompt_command//__tcomp_post_prompt[;$'\n']}"
-  existing_prompt_command="${existing_prompt_command//__tcomp_post_prompt}"
+  existing_prompt_command="${existing_prompt_command//__fig_post_prompt[;$'\n']}"
+  existing_prompt_command="${existing_prompt_command//__fig_post_prompt}"
   existing_prompt_command="${existing_prompt_command//__bp_interactive_mode[;$'\n']}"
   existing_prompt_command="${existing_prompt_command//__bp_interactive_mode}"
   __bp_sanitize_string existing_prompt_command "$existing_prompt_command"
@@ -140,26 +140,26 @@ __tcomp_reset_hooks() {
       PROMPT_COMMAND+=${existing_prompt_command}$'\n'
   fi;
   # shellcheck disable=SC2179
-  PROMPT_COMMAND+=$'__tcomp_post_prompt\n'
+  PROMPT_COMMAND+=$'__fig_post_prompt\n'
   # shellcheck disable=SC2179
   PROMPT_COMMAND+='__bp_interactive_mode'
 
-  if [[ ${precmd_functions[0]} != __tcomp_pre_prompt ]]; then
+  if [[ ${precmd_functions[0]} != __fig_pre_prompt ]]; then
     for index in "${!precmd_functions[@]}"; do
-      if [[ ${precmd_functions[$index]} == __tcomp_pre_prompt ]]; then
+      if [[ ${precmd_functions[$index]} == __fig_pre_prompt ]]; then
         unset -v 'precmd_functions[$index]'
       fi
     done
-    precmd_functions=(__tcomp_pre_prompt "${precmd_functions[@]}")
+    precmd_functions=(__fig_pre_prompt "${precmd_functions[@]}")
   fi
 
-  if [[ ${preexec_functions[0]} != __tcomp_preexec_preserve_status ]]; then
+  if [[ ${preexec_functions[0]} != __fig_preexec_preserve_status ]]; then
     for index in "${!preexec_functions[@]}"; do
-      if [[ ${preexec_functions[$index]} == __tcomp_preexec_preserve_status ]]; then
+      if [[ ${preexec_functions[$index]} == __fig_preexec_preserve_status ]]; then
         unset -v 'preexec_functions[$index]'
       fi
     done
-    preexec_functions=(__tcomp_preexec_preserve_status "${preexec_functions[@]}")
+    preexec_functions=(__fig_preexec_preserve_status "${preexec_functions[@]}")
   fi
 }
 
@@ -173,9 +173,9 @@ __tcomp_reset_hooks() {
 if [[ "${TERM_PROGRAM}" != "WarpTerminal" ]]; then
   __bp_install_after_session_init
 fi
-__tcomp_reset_hooks
-if [[ -n "${PROCESS_LAUNCHED_BY_TCOMP:-}" ]]; then
-  tcomp_osc DoneSourcing
+__fig_reset_hooks
+if [[ -n "${PROCESS_LAUNCHED_BY_Q:-}" ]]; then
+  fig_osc DoneSourcing
 fi
 
 fi

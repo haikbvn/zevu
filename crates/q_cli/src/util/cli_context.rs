@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
 use fig_os_shim::Context;
-use fig_settings::{Settings, State};
+use fig_settings::{
+    Settings,
+    State,
+};
 
 #[derive(Debug, Clone)]
 pub struct CliContext {

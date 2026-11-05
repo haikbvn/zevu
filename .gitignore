@@ -52,7 +52,6 @@ run-build.sh
 # Amazon Q CLI files
 .amazonq/
 
-# Isolated build tools and local packages
-.tools/
-dist/
-build/
+# Local macOS build and verification outputs
+/dist/
+/crates/fig_integrations/src/intellij/instrumented-zevu-terminal-companion-*.jar

@@ -1,7 +1,18 @@
-use fig_integrations::shell::ShellExt;
-use fig_os_shim::{ContextArcProvider, ContextProvider, EnvProvider};
-use fig_proto::fig::{OnboardingAction, OnboardingRequest};
-use fig_settings::{SettingsProvider, StateProvider};
+use fig_integrations::Integration;
+use fig_integrations::shell::{ShellExt, shell_executable};
+use fig_os_shim::{
+    ContextArcProvider,
+    ContextProvider,
+    EnvProvider,
+};
+use fig_proto::fig::{
+    OnboardingAction,
+    OnboardingRequest,
+};
+use fig_settings::{
+    SettingsProvider,
+    StateProvider,
+};
 use fig_util::Shell;
 use tao::event_loop::ControlFlow;
 #[cfg(target_os = "macos")]
@@ -9,13 +20,12 @@ use tokio::process::Command;
 #[allow(unused_imports)]
 use tracing::error;
 
-use super::{RequestResult, RequestResultImpl};
+use super::{
+    RequestResult,
+    RequestResultImpl,
+};
 use crate::EventLoopProxy;
 use crate::event::Event;
-
-pub async fn post_login() {
-    fig_settings::state::set_value("desktop.completedOnboarding", true).ok();
-}
 
 pub async fn onboarding<Ctx>(request: OnboardingRequest, proxy: &EventLoopProxy, ctx: &Ctx) -> RequestResult
 where
@@ -24,7 +34,20 @@ where
     match request.action() {
         OnboardingAction::InstallationScript => {
             let mut errs: Vec<String> = vec![];
-            for shell in [Shell::Bash, Shell::Zsh] {
+            for shell in Shell::all() {
+                if shell_executable(*shell, ctx.env()).is_none() {
+                    continue;
+                }
+                match shell.get_script_integrations() {
+                    Ok(integrations) => {
+                        for integration in integrations {
+                            if let Err(err) = integration.install().await {
+                                errs.push(format!("{}: {err}", integration.path.display()));
+                            }
+                        }
+                    },
+                    Err(err) => errs.push(format!("{shell}: {err}")),
+                }
                 match shell.get_shell_integrations(ctx.env()) {
                     Ok(integrations) => {
                         for integration in integrations {
@@ -32,10 +55,10 @@ where
                                 errs.push(format!("{integration}: {err}"));
                             }
                         }
-                    }
+                    },
                     Err(err) => {
                         errs.push(format!("{shell}: {err}"));
-                    }
+                    },
                 }
             }
 
@@ -43,12 +66,68 @@ where
                 [] => RequestResult::success(),
                 errs => RequestResult::error(errs.join("\n")),
             }
-        }
-        OnboardingAction::Uninstall => RequestResult::error("Run tcomp uninstall to remove shell integrations"),
+        },
+        OnboardingAction::Uninstall => {
+            use fig_install::{
+                InstallComponents,
+                uninstall,
+            };
+
+            let result = match uninstall(InstallComponents::all(), ctx.context_arc()).await {
+                Ok(_) => RequestResult::success(),
+                Err(err) => RequestResult::error(err.to_string()),
+            };
+
+            proxy.send_event(Event::ControlFlow(ControlFlow::Exit)).ok();
+            result
+        },
         OnboardingAction::FinishOnboarding => {
-            post_login().await;
-            RequestResult::success()
-        }
+            let mut errors = Vec::new();
+            for shell in Shell::all() {
+                if shell_executable(*shell, ctx.env()).is_none() {
+                    continue;
+                }
+                match shell.get_script_integrations() {
+                    Ok(integrations) => {
+                        for integration in integrations {
+                            if let Err(err) = integration.is_installed().await {
+                                errors.push(format!("{}: {err}", integration.path.display()));
+                            }
+                        }
+                    },
+                    Err(err) => errors.push(format!("{shell}: {err}")),
+                }
+                match shell.get_shell_integrations(ctx.env()) {
+                    Ok(integrations) => {
+                        for integration in integrations {
+                            if let Err(err) = integration.is_installed().await {
+                                errors.push(format!("{integration}: {err}"));
+                            }
+                        }
+                    },
+                    Err(err) => errors.push(format!("{shell}: {err}")),
+                }
+            }
+            if crate::platform::PlatformState::accessibility_is_enabled() == Some(false) {
+                errors.push("Accessibility permission is required".into());
+            }
+            #[cfg(target_os = "macos")]
+            if ctx.state().get_bool_or("desktop.inputMethodRequired", false) {
+                let input_method = fig_integrations::input_method::InputMethod::default();
+                if let Err(err) = input_method.is_installed().await {
+                    errors.push(format!("Input method: {err}"));
+                } else if !input_method.is_enabled().unwrap_or(false) {
+                    errors.push("The input method must be enabled for this terminal".into());
+                }
+            }
+            if !errors.is_empty() {
+                return RequestResult::error(errors.join("\n"));
+            }
+            match ctx.state().set_value("desktop.completedOnboarding", true) {
+                Ok(()) => RequestResult::success(),
+                Err(err) => RequestResult::error(err.to_string()),
+            }
+        },
         OnboardingAction::LaunchShellOnboarding => {
             fig_settings::state::set_value("user.onboarding", false).ok();
 
@@ -82,9 +161,12 @@ where
                     }
                 }
             }
-        }
+        },
         OnboardingAction::PromptForAccessibilityPermission => {
-            use crate::local_ipc::{LocalResponse, commands};
+            use crate::local_ipc::{
+                LocalResponse,
+                commands,
+            };
             let res = commands::prompt_for_accessibility_permission(ctx)
                 .await
                 .unwrap_or_else(|e| e);
@@ -95,11 +177,7 @@ where
                 } => RequestResult::error(message),
                 _ => RequestResult::error("Failed to prompt for accessibility permissions"),
             }
-        }
-        OnboardingAction::PostLogin => {
-            post_login().await;
-            RequestResult::success()
-        }
+        },
         OnboardingAction::CloseAccessibilityPromptWindow
         | OnboardingAction::RequestRestart
         | OnboardingAction::CloseInputMethodPromptWindow => RequestResult::error("Unimplemented"),

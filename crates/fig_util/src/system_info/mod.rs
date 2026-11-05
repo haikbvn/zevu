@@ -5,8 +5,14 @@ use std::sync::OnceLock;
 
 use cfg_if::cfg_if;
 use fig_os_shim::Env;
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use serde::{
+    Deserialize,
+    Serialize,
+};
+use sha2::{
+    Digest,
+    Sha256,
+};
 
 use crate::Error;
 use crate::manifest::is_minimal;
@@ -57,7 +63,7 @@ impl OSVersion {
                 } else {
                     SupportLevel::Unsupported
                 }
-            }
+            },
             OSVersion::Linux { .. } => match (is_remote(), is_minimal()) {
                 (true, true) => SupportLevel::Supported,
                 (false, true) => SupportLevel::SupportedWithCaveat {
@@ -116,7 +122,7 @@ Please upgrade to Windows 11 or wait for a fix while we work this issue out."
                 }
 
                 v
-            }
+            },
             other => vec![format!("{other}")],
         }
     }
@@ -133,7 +139,7 @@ impl std::fmt::Display for OSVersion {
             } => {
                 let patch = patch.unwrap_or(0);
                 write!(f, "macOS {major}.{minor}.{patch} ({build})")
-            }
+            },
             OSVersion::Linux {
                 kernel_version,
                 os_release,
@@ -346,7 +352,7 @@ pub fn get_system_id() -> Option<&'static str> {
 }
 
 pub fn get_platform() -> &'static str {
-    if let Some(over_ride) = option_env!("TCOMP_OVERRIDE_PLATFORM") {
+    if let Some(over_ride) = option_env!("Q_OVERRIDE_PLATFORM") {
         over_ride
     } else {
         std::env::consts::OS
@@ -354,7 +360,7 @@ pub fn get_platform() -> &'static str {
 }
 
 pub fn get_arch() -> &'static str {
-    if let Some(over_ride) = option_env!("TCOMP_OVERRIDE_ARCH") {
+    if let Some(over_ride) = option_env!("Q_OVERRIDE_ARCH") {
         over_ride
     } else {
         std::env::consts::ARCH

@@ -5,26 +5,60 @@ use base64::prelude::*;
 use bytes::BytesMut;
 use fig_proto::fig::notification::Type as NotificationEnum;
 use fig_proto::fig::server_originated_message::Submessage as ServerOriginatedSubMessage;
-use fig_proto::fig::{EventNotification, Notification, NotificationType, ServerOriginatedMessage};
+use fig_proto::fig::{
+    EventNotification,
+    Notification,
+    NotificationType,
+    ServerOriginatedMessage,
+};
 use fig_proto::local::caret_position_hook::Origin;
 use fig_proto::prost::Message;
-use fig_remote_ipc::figterm::{FigtermCommand, FigtermState};
+use fig_remote_ipc::figterm::{
+    FigtermCommand,
+    FigtermState,
+};
 use parking_lot::Mutex;
-use tao::dpi::{LogicalPosition, LogicalSize, Position};
+use tao::dpi::{
+    LogicalPosition,
+    LogicalSize,
+    Position,
+};
 use tao::window::Window;
 use tokio::sync::mpsc::UnboundedSender;
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{
+    debug,
+    error,
+    info,
+    instrument,
+    warn,
+};
 use url::Url;
-use wry::{Theme, WebContext, WebView};
+use wry::{
+    Theme,
+    WebContext,
+    WebView,
+};
 
 use super::notification::WebviewNotificationsState;
 use super::to_tao_theme;
 use super::window_id::WindowId;
-use crate::event::{EmitEventName, WindowEvent, WindowGeometryResult, WindowPosition};
-use crate::platform::{self, PlatformState};
+use crate::event::{
+    EmitEventName,
+    WindowEvent,
+    WindowGeometryResult,
+    WindowPosition,
+};
+use crate::platform::{
+    self,
+    PlatformState,
+};
 use crate::utils::Rect;
 #[allow(unused_imports)]
-use crate::{AUTOCOMPLETE_ID, DASHBOARD_ID, EventLoopWindowTarget};
+use crate::{
+    AUTOCOMPLETE_ID,
+    DASHBOARD_ID,
+    EventLoopWindowTarget,
+};
 
 pub struct WindowGeometryState {
     /// The outer position of the window by positioning scheme
@@ -97,7 +131,7 @@ impl WindowState {
             Some(position) if !dry_run => {
                 state.position = position;
                 position
-            }
+            },
             Some(position) => position,
             None => state.position,
         };
@@ -106,7 +140,7 @@ impl WindowState {
             Some(size) if !dry_run => {
                 state.size = size;
                 size
-            }
+            },
             _ => state.size,
         };
 
@@ -114,7 +148,7 @@ impl WindowState {
             Some(anchor) if !dry_run => {
                 state.anchor = anchor;
                 anchor
-            }
+            },
             _ => state.anchor,
         };
 
@@ -140,7 +174,7 @@ impl WindowState {
                     false,
                     false,
                 )
-            }
+            },
             WindowPosition::RelativeToCaret {
                 caret_position,
                 caret_size,
@@ -185,10 +219,10 @@ impl WindowState {
                                         + primary_monitor_size.map(|size| size.height).unwrap_or_default()
                                         - logical_caret_position.y
                                         - logical_caret_size.height;
-                            }
+                            },
                             Origin::TopLeft => {
                                 // This is the default
-                            }
+                            },
                         }
 
                         monitor_frame
@@ -249,14 +283,14 @@ impl WindowState {
                 };
 
                 (Position::Logical(LogicalPosition::new(x, y)), above, clipped)
-            }
+            },
         };
 
         if !dry_run {
             match platform_state.position_window(&self.window, &self.window_id, position) {
                 Ok(_) => {
                     tracing::trace!(window_id =% self.window_id, ?position, ?is_above, ?is_clipped, "updated window geometry: first set");
-                }
+                },
                 Err(err) => tracing::error!(%err, window_id =% self.window_id, "failed to position window"),
             }
 
@@ -266,7 +300,7 @@ impl WindowState {
             match platform_state.position_window(&self.window, &self.window_id, position) {
                 Ok(_) => {
                     tracing::trace!(window_id =% self.window_id,"updated window geometry: second set");
-                }
+                },
                 Err(err) => tracing::error!(%err, window_id =% self.window_id, "failed to position window"),
             }
         }
@@ -301,7 +335,7 @@ impl WindowState {
                         tracing::error!(%err, "failed to send window geometry update result");
                     }
                 }
-            }
+            },
             WindowEvent::Hide => {
                 if !self.window.is_visible() {
                     return;
@@ -325,7 +359,10 @@ impl WindowState {
 
                 #[cfg(target_os = "macos")]
                 if self.window_id == DASHBOARD_ID {
-                    use tao::platform::macos::{ActivationPolicy, EventLoopWindowTargetExtMacOS};
+                    use tao::platform::macos::{
+                        ActivationPolicy,
+                        EventLoopWindowTargetExtMacOS,
+                    };
 
                     let mut policy_lock = platform::ACTIVATION_POLICY.lock().unwrap();
                     if *policy_lock != ActivationPolicy::Accessory {
@@ -333,7 +370,7 @@ impl WindowState {
                         window_target.set_activation_policy_at_runtime(ActivationPolicy::Accessory);
                     }
                 }
-            }
+            },
             WindowEvent::Show => {
                 if self.window_id == AUTOCOMPLETE_ID {
                     if platform::autocomplete_active() {
@@ -358,7 +395,10 @@ impl WindowState {
                 } else {
                     #[cfg(target_os = "macos")]
                     if self.window_id == DASHBOARD_ID {
-                        use tao::platform::macos::{ActivationPolicy, EventLoopWindowTargetExtMacOS};
+                        use tao::platform::macos::{
+                            ActivationPolicy,
+                            EventLoopWindowTargetExtMacOS,
+                        };
 
                         let mut policy_lock = platform::ACTIVATION_POLICY.lock().unwrap();
                         if *policy_lock != ActivationPolicy::Regular {
@@ -370,46 +410,38 @@ impl WindowState {
                     self.window.set_visible(true);
                     self.window.set_focus();
                 }
-            }
+            },
             WindowEvent::NavigateAbsolute { url } => {
                 self.webview
                     .evaluate_script(&format!("window.location.href = '{url}';"))
                     .unwrap();
                 *self.url.lock() = url;
-            }
+            },
             WindowEvent::NavigateRelative { path } => {
                 let event_name = "dashboard.navigate";
                 let payload = serde_json::json!({ "path": path });
 
-                self.notification(
-                    notifications_state,
-                    &NotificationType::NotifyOnEvent,
-                    Notification {
-                        r#type: Some(NotificationEnum::EventNotification(EventNotification {
-                            event_name: Some(event_name.to_string()),
-                            payload: Some(payload.to_string()),
-                        })),
-                    },
-                );
-            }
+                self.notification(notifications_state, &NotificationType::NotifyOnEvent, Notification {
+                    r#type: Some(NotificationEnum::EventNotification(EventNotification {
+                        event_name: Some(event_name.to_string()),
+                        payload: Some(payload.to_string()),
+                    })),
+                });
+            },
             WindowEvent::NavigateForward => {
                 self.webview.evaluate_script("window.history.forward();").unwrap();
-            }
+            },
             WindowEvent::NavigateBack => {
                 self.webview.evaluate_script("window.history.back();").unwrap();
-            }
+            },
             WindowEvent::Event { event_name, payload } => {
-                self.notification(
-                    notifications_state,
-                    &NotificationType::NotifyOnEvent,
-                    Notification {
-                        r#type: Some(NotificationEnum::EventNotification(EventNotification {
-                            event_name: Some(event_name.into_owned()),
-                            payload: payload.map(|s| s.into_owned()),
-                        })),
-                    },
-                );
-            }
+                self.notification(notifications_state, &NotificationType::NotifyOnEvent, Notification {
+                    r#type: Some(NotificationEnum::EventNotification(EventNotification {
+                        event_name: Some(event_name.into_owned()),
+                        payload: payload.map(|s| s.into_owned()),
+                    })),
+                });
+            },
             WindowEvent::Reload => {
                 info!(%self.window_id, "Reloading window");
 
@@ -426,20 +458,20 @@ impl WindowState {
                         }}"
                     ))
                     .unwrap();
-            }
+            },
             WindowEvent::Emit { event_name, payload } => {
                 self.emit(event_name, payload);
-            }
+            },
             WindowEvent::Api { payload } => {
                 api_tx.send((self.window_id.clone(), payload)).unwrap();
-            }
+            },
             WindowEvent::Devtools => {
                 if self.webview.is_devtools_open() {
                     self.webview.close_devtools();
                 } else {
                     self.webview.open_devtools();
                 }
-            }
+            },
             WindowEvent::DebugMode(debug_mode) => {
                 // Macos does not support setting the webview background color so we have
                 // to set the css background root color to see the window
@@ -462,14 +494,28 @@ impl WindowState {
                     }
 
                 }
-            }
-            WindowEvent::SetEnabled(enabled) => self.set_enabled(enabled),
+            },
+            WindowEvent::SetEnabled(enabled) => {
+                self.set_enabled(enabled);
+                if !enabled {
+                    // Gating future events does not dismiss an already visible window
+                    // or release figterm's visibility-based key interception.
+                    self.handle(
+                        WindowEvent::Hide,
+                        figterm_state,
+                        platform_state,
+                        notifications_state,
+                        window_target,
+                        api_tx,
+                    );
+                }
+            },
             WindowEvent::SetTheme(theme) => self.set_theme(theme),
             WindowEvent::Drag => {
                 if let Err(err) = self.window.drag_window() {
                     error!(%err, "Failed to drag window");
                 }
-            }
+            },
             WindowEvent::Batch(events) => {
                 for event in events {
                     self.handle(
@@ -481,7 +527,7 @@ impl WindowState {
                         api_tx,
                     );
                 }
-            }
+            },
         }
     }
 
@@ -514,7 +560,7 @@ impl WindowState {
                     Ok(_) => {
                         debug!(?notification_type, %window_id, "Sending notification");
                         self.emit(EmitEventName::ProtoMessageReceived, BASE64_STANDARD.encode(encoded));
-                    }
+                    },
                     Err(err) => error!(%err, "Failed to encode notification"),
                 }
             } else {

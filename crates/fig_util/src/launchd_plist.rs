@@ -220,10 +220,10 @@ impl LaunchdPlist {
         match self.environment_variables {
             Some(ref mut env) => {
                 env.insert(key.into(), value.into());
-            }
+            },
             None => {
                 self.environment_variables = Some(BTreeMap::from_iter(vec![(key.into(), value.into())]));
-            }
+            },
         };
         self
     }

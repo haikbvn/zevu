@@ -1,17 +1,26 @@
 use std::fmt::Display;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 use std::str::FromStr;
 
 use clap::ValueEnum;
 use fig_os_shim::Env;
 use regex::Regex;
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize,
+    Serialize,
+};
 use tokio::process::Command;
 
 use crate::consts::build::SKIP_FISH_TESTS;
-use crate::env_var::TCOMP_ZDOTDIR;
+use crate::env_var::Q_ZDOTDIR;
 use crate::process_info::get_parent_process_exe;
-use crate::{Error, directories};
+use crate::{
+    Error,
+    directories,
+};
 
 /// All supported shells
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ValueEnum)]
@@ -95,26 +104,24 @@ impl Shell {
 
     /// Get the directory for the shell that contains the dotfiles
     pub fn get_config_directory(&self, env: &Env) -> Result<PathBuf, directories::DirectoryError> {
-        if let Some(path) = env.get_os("TCOMP_SHELL_CONFIG_DIR") {
-            let path = PathBuf::from(path);
-            if !path.is_absolute() {
-                return Err(directories::DirectoryError::NoHomeDirectory);
-            }
-            return Ok(path);
-        }
         match self {
             Shell::Bash => Ok(directories::home_dir()?),
             Shell::Zsh => match env
                 .get_os("ZDOTDIR")
-                .or_else(|| env.get_os(TCOMP_ZDOTDIR))
+                .or_else(|| env.get_os(Q_ZDOTDIR))
                 .map(PathBuf::from)
             {
                 Some(dir) => Ok(dir),
                 None => Ok(directories::home_dir()?),
             },
-            Shell::Fish => match env.get_os("__fish_config_dir").map(PathBuf::from) {
-                Some(dir) => Ok(dir),
-                None => Ok(directories::home_dir()?.join(".config").join("fish")),
+            Shell::Fish => {
+                if let Some(dir) = env.get_os("__fish_config_dir").filter(|dir| !dir.is_empty()) {
+                    Ok(PathBuf::from(dir))
+                } else if let Some(dir) = env.get_os("XDG_CONFIG_HOME").filter(|dir| !dir.is_empty()) {
+                    Ok(PathBuf::from(dir).join("fish"))
+                } else {
+                    Ok(directories::home_dir()?.join(".config").join("fish"))
+                }
             },
             Shell::Nu => Ok(directories::config_dir()?.join("nushell")),
         }
@@ -162,23 +169,23 @@ async fn shell_version(shell: &Shell, exe_path: &Path) -> Result<String, Error> 
             let version_output = Command::new(exe_path).arg("--version").output().await?;
             let version_capture = re.captures(std::str::from_utf8(&version_output.stdout)?);
             Ok(version_capture.ok_or_else(err)?.get(1).ok_or_else(err)?.as_str().into())
-        }
+        },
         Shell::Zsh => {
             let re = Regex::new(ZSH_RE).unwrap();
             let version_output = Command::new(exe_path).arg("--version").output().await?;
             let version_capture = re.captures(std::str::from_utf8(&version_output.stdout)?);
             Ok(version_capture.ok_or_else(err)?.get(1).ok_or_else(err)?.as_str().into())
-        }
+        },
         Shell::Fish => {
             let re = Regex::new(FISH_RE).unwrap();
             let version_output = Command::new(exe_path).arg("--version").output().await?;
             let version_capture = re.captures(std::str::from_utf8(&version_output.stdout)?);
             Ok(version_capture.ok_or_else(err)?.get(1).ok_or_else(err)?.as_str().into())
-        }
+        },
         Shell::Nu => {
             let version_output = Command::new(exe_path).arg("--version").output().await?;
             Ok(std::str::from_utf8(&version_output.stdout)?.trim().into())
-        }
+        },
     }
 }
 
@@ -208,6 +215,27 @@ mod tests {
                 .unwrap_or_else(|err| panic!("exe {} failed. Error: {:?}", exe_path_str, err));
             println!("{}: {version:?}\n", exe_path.display());
         }
+    }
+
+    #[test]
+    fn fish_config_directory_precedence() {
+        let fish = Env::from_slice(&[
+            ("__fish_config_dir", "/tmp/fish-own"),
+            ("XDG_CONFIG_HOME", "/tmp/xdg"),
+        ]);
+        assert_eq!(Shell::Fish.get_config_directory(&fish).unwrap(), PathBuf::from("/tmp/fish-own"));
+
+        let xdg = Env::from_slice(&[
+            ("__fish_config_dir", ""),
+            ("XDG_CONFIG_HOME", "/tmp/xdg"),
+        ]);
+        assert_eq!(Shell::Fish.get_config_directory(&xdg).unwrap(), PathBuf::from("/tmp/xdg/fish"));
+
+        let empty = Env::from_slice(&[("__fish_config_dir", ""), ("XDG_CONFIG_HOME", "")]);
+        assert_eq!(
+            Shell::Fish.get_config_directory(&empty).unwrap(),
+            directories::home_dir().unwrap().join(".config/fish"),
+        );
     }
 
     #[test]

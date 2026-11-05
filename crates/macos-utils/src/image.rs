@@ -2,8 +2,21 @@ use std::path::Path;
 
 use objc2::ClassType;
 use objc2::rc::Retained;
-use objc2_app_kit::{NSBitmapImageFileType, NSBitmapImageRep, NSGraphicsContext, NSImage, NSWorkspace};
-use objc2_foundation::{NSDictionary, NSFileTypeDirectory, NSPoint, NSRect, NSSize, NSString};
+use objc2_app_kit::{
+    NSBitmapImageFileType,
+    NSBitmapImageRep,
+    NSGraphicsContext,
+    NSImage,
+    NSWorkspace,
+};
+use objc2_foundation::{
+    NSDictionary,
+    NSFileTypeDirectory,
+    NSPoint,
+    NSRect,
+    NSSize,
+    NSString,
+};
 
 #[allow(clippy::missing_safety_doc)]
 unsafe fn resize_image(image: &NSImage, size: NSSize) -> Option<Retained<NSImage>> {
@@ -56,13 +69,10 @@ pub unsafe fn png_for_path(path: &Path) -> Option<Vec<u8>> {
 
 fn convert_image(image: &NSImage) -> Option<Vec<u8>> {
     let image = unsafe {
-        resize_image(
-            image,
-            NSSize {
-                width: 32.0,
-                height: 32.0,
-            },
-        )
+        resize_image(image, NSSize {
+            width: 32.0,
+            height: 32.0,
+        })
     }?;
     let tiff_data = unsafe { image.TIFFRepresentation() }?;
 

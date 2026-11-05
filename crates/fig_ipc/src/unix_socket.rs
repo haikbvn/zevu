@@ -2,9 +2,17 @@ use std::path::Path;
 use std::time::Duration;
 
 use tokio::net::UnixStream;
-use tracing::{debug, error, trace, warn};
+use tracing::{
+    debug,
+    error,
+    trace,
+    warn,
+};
 
-use crate::{BufferedReader, ConnectError};
+use crate::{
+    BufferedReader,
+    ConnectError,
+};
 
 struct OctalU32(u32);
 
@@ -64,7 +72,7 @@ pub async fn socket_connect(socket_path: impl AsRef<Path>) -> Result<UnixStream,
         Err(err) => {
             error!(%err, ?socket_path, "Failed to connect");
             return Err(err.into());
-        }
+        },
     };
 
     // Set lower permissions bits to 0o600
@@ -98,7 +106,7 @@ pub async fn socket_connect_timeout(socket: impl AsRef<Path>, timeout: Duration)
         Err(_) => {
             error!(?socket, ?timeout, "Timeout while connecting");
             Err(ConnectError::Timeout)
-        }
+        },
     }
 }
 

@@ -4,9 +4,16 @@ use std::sync::Mutex;
 
 use anyhow::Result;
 use fig_settings::settings;
-use tracing::{error, info, warn};
+use tracing::{
+    error,
+    info,
+    warn,
+};
 
-use crate::protocol::icons::{ProcessedAsset, process_asset};
+use crate::protocol::icons::{
+    ProcessedAsset,
+    process_asset,
+};
 
 static SELECTED_THEME: Mutex<Cow<'_, str>> = Mutex::new(Cow::Borrowed("hicolor"));
 
@@ -31,7 +38,7 @@ pub fn init() -> Result<()> {
                 if let Ok(output) = String::from_utf8(output.stdout) {
                     let _ = set_theme(output.split_at(1).1.split_at(output.len() - 3).0.to_string());
                 }
-            }
+            },
             Err(err) => error!(?err, "unable to get icon theme from gsettings"),
         }
     }
@@ -66,7 +73,7 @@ pub(super) async fn lookup(name: &str) -> Option<ProcessedAsset> {
             Err(err) => {
                 error!("failed processing asset at {path:?}: {err:?}");
                 None
-            }
+            },
         }
     } else {
         None

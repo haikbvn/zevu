@@ -2,15 +2,37 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use fig_proto::local::{
-    self, BundleMetadataCommand, BundleMetadataResponse, CommandResponse, DebugModeCommand, DevtoolsCommand,
-    DumpStateCommand, DumpStateResponse, InputMethodAction, InputMethodCommand, LogLevelCommand, LogLevelResponse,
-    LoginCommand, LogoutCommand, OpenUiElementCommand, PromptAccessibilityCommand, QuitCommand, RestartCommand,
-    RestartSettingsListenerCommand, UiElement, UpdateCommand, command, command_response, devtools_command,
+    self,
+    BundleMetadataCommand,
+    BundleMetadataResponse,
+    CommandResponse,
+    DebugModeCommand,
+    DevtoolsCommand,
+    DumpStateCommand,
+    DumpStateResponse,
+    InputMethodAction,
+    InputMethodCommand,
+    LogLevelCommand,
+    LogLevelResponse,
+    OpenUiElementCommand,
+    PromptAccessibilityCommand,
+    QuitCommand,
+    RestartCommand,
+    RestartSettingsListenerCommand,
+    UiElement,
+    command,
+    command_response,
+    devtools_command,
     dump_state_command,
 };
 use fig_util::directories;
 
-use crate::{BufferedUnixStream, Error, RecvError, SendRecvMessage};
+use crate::{
+    BufferedUnixStream,
+    Error,
+    RecvError,
+    SendRecvMessage,
+};
 
 type Result<T, E = crate::Error> = std::result::Result<T, E>;
 
@@ -96,11 +118,6 @@ pub async fn prompt_accessibility_command() -> Result<()> {
     send_command_to_socket(command).await
 }
 
-pub async fn update_command(force: bool) -> Result<Option<CommandResponse>> {
-    let command = command::Command::Update(UpdateCommand { force });
-    send_recv_command_to_socket_with_timeout(command, std::time::Duration::from_secs(120)).await
-}
-
 pub async fn restart_command() -> Result<()> {
     let command = command::Command::Restart(RestartCommand {});
     send_command_to_socket(command).await
@@ -108,16 +125,6 @@ pub async fn restart_command() -> Result<()> {
 
 pub async fn quit_command() -> Result<()> {
     let command = command::Command::Quit(QuitCommand {});
-    send_command_to_socket(command).await
-}
-
-pub async fn login_command() -> Result<()> {
-    let command = command::Command::Login(LoginCommand {});
-    send_command_to_socket(command).await
-}
-
-pub async fn logout_command() -> Result<()> {
-    let command = command::Command::Logout(LogoutCommand {});
     send_command_to_socket(command).await
 }
 

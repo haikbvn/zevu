@@ -1,7 +1,10 @@
 //! Fig.js Protocol Buffers
 
 use serde::Serialize;
-use serde::ser::{SerializeStruct, SerializeTuple};
+use serde::ser::{
+    SerializeStruct,
+    SerializeTuple,
+};
 use serde_json::Value;
 
 use crate::proto::fig_common::*;

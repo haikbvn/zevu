@@ -10,34 +10,16 @@ import {
 import { sendInstallRequest } from "./requests.js";
 import { NotificationResponse, _subscribe } from "./notifications.js";
 
-export type Component =
-  | "dotfiles"
-  | "ibus"
-  | "inputMethod"
-  | "accessibility"
-  | "desktopEntry"
-  | "autostartEntry"
-  | "gnomeExtension"
-  | "ssh";
+export type Component = "dotfiles" | "inputMethod" | "accessibility";
 
 function componentToProto(component: Component) {
   switch (component) {
     case "dotfiles":
       return InstallComponent.DOTFILES;
-    case "ibus":
-      return InstallComponent.IBUS;
     case "accessibility":
       return InstallComponent.ACCESSIBILITY;
     case "inputMethod":
       return InstallComponent.INPUT_METHOD;
-    case "ssh":
-      return InstallComponent.SSH;
-    case "desktopEntry":
-      return InstallComponent.DESKTOP_ENTRY;
-    case "autostartEntry":
-      return InstallComponent.AUTOSTART_ENTRY;
-    case "gnomeExtension":
-      return InstallComponent.GNOME_EXTENSION;
     default:
       throw Error("Invalid component");
   }

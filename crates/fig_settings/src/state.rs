@@ -1,8 +1,14 @@
 use serde::de::DeserializeOwned;
-use serde_json::{Map, Value};
+use serde_json::{
+    Map,
+    Value,
+};
 
 use crate::Result;
-use crate::sqlite::{Db, database};
+use crate::sqlite::{
+    Db,
+    database,
+};
 
 #[derive(Debug, Clone, Default)]
 pub struct State(inner::Inner);
@@ -158,7 +164,10 @@ pub fn get_int_or(key: impl AsRef<str>, default: i64) -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{Result, State};
+    use super::{
+        Result,
+        State,
+    };
 
     /// General read/write state test
     #[test]

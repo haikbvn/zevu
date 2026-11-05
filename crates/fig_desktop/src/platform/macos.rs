@@ -5,40 +5,123 @@
 use std::ffi::CString;
 use std::path::Path;
 use std::slice;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, LazyLock, Mutex, RwLock};
+use std::sync::atomic::{
+    AtomicBool,
+    Ordering,
+};
+use std::sync::{
+    Arc,
+    LazyLock,
+    Mutex,
+    RwLock,
+};
 
 use accessibility_sys::{
-    AXError, AXIsProcessTrusted, AXUIElementCreateSystemWide, AXUIElementSetMessagingTimeout, pid_t,
+    AXError,
+    AXIsProcessTrusted,
+    AXUIElementCreateSystemWide,
+    AXUIElementSetMessagingTimeout,
+    pid_t,
 };
 use anyhow::Context;
-use cocoa::base::{NO, YES, id};
+use cocoa::base::{
+    NO,
+    YES,
+    id,
+};
 use core_graphics::display::CGRect;
 use core_graphics::window::CGWindowID;
 use fig_integrations::input_method::InputMethod;
-use fig_proto::fig::{AccessibilityChangeNotification, Notification, NotificationType};
+use fig_proto::fig::{
+    AccessibilityChangeNotification,
+    Notification,
+    NotificationType,
+};
 use fig_proto::local::caret_position_hook::Origin;
 use fig_util::Terminal;
 use macos_utils::accessibility::accessibility_is_enabled;
-use macos_utils::caret_position::{CaretPosition, get_caret_position};
-use macos_utils::window_server::{CGWindowLevelForKey, UIElement};
-use macos_utils::{NotificationCenter, WindowServer, WindowServerEvent};
+use macos_utils::caret_position::{
+    CaretPosition,
+    get_caret_position,
+};
+use macos_utils::window_server::{
+    CGWindowLevelForKey,
+    UIElement,
+};
+use macos_utils::{
+    NotificationCenter,
+    WindowServer,
+    WindowServerEvent,
+};
 use objc::declare::MethodImplementation;
-use objc::runtime::{BOOL, Class, Object, Sel, class_addMethod, objc_getClass};
-use objc::{Encode, EncodeArguments, Encoding, msg_send, sel, sel_impl};
-use objc2_foundation::{NSDictionary, NSOperationQueue, ns_string};
+use objc::runtime::{
+    BOOL,
+    Class,
+    Object,
+    Sel,
+    class_addMethod,
+    objc_getClass,
+};
+use objc::{
+    Encode,
+    EncodeArguments,
+    Encoding,
+    msg_send,
+    sel,
+    sel_impl,
+};
+use objc2_app_kit::NSWorkspace;
+use objc2_foundation::{
+    NSDictionary,
+    NSOperationQueue,
+    ns_string,
+};
 use serde::Serialize;
-use tao::dpi::{LogicalPosition, LogicalSize, Position};
-use tao::platform::macos::{ActivationPolicy, EventLoopWindowTargetExtMacOS, WindowExtMacOS as _};
-use tracing::{debug, error, trace, warn};
+use tao::dpi::{
+    LogicalPosition,
+    LogicalSize,
+    Position,
+};
+use tao::platform::macos::{
+    ActivationPolicy,
+    EventLoopWindowTargetExtMacOS,
+    WindowExtMacOS as _,
+};
+use tracing::{
+    debug,
+    error,
+    trace,
+    warn,
+};
 
-use super::{PlatformBoundEvent, PlatformWindow};
-use crate::event::{Event, WindowEvent, WindowPosition};
-use crate::protocol::icons::{AssetKind, AssetSpecifier, ProcessedAsset};
+use super::{
+    PlatformBoundEvent,
+    PlatformWindow,
+};
+use crate::event::{
+    Event,
+    WindowEvent,
+    WindowPosition,
+};
+use crate::protocol::icons::{
+    AssetKind,
+    AssetSpecifier,
+    ProcessedAsset,
+};
 use crate::utils::Rect;
 use crate::webview::notification::WebviewNotificationsState;
-use crate::webview::{FigIdMap, GLOBAL_PROXY, WindowId};
-use crate::{AUTOCOMPLETE_ID, AUTOCOMPLETE_WINDOW_TITLE, DASHBOARD_ID, EventLoopProxy, EventLoopWindowTarget};
+use crate::webview::{
+    FigIdMap,
+    GLOBAL_PROXY,
+    WindowId,
+};
+use crate::{
+    AUTOCOMPLETE_ID,
+    AUTOCOMPLETE_WINDOW_TITLE,
+    DASHBOARD_ID,
+    EventLoopProxy,
+    EventLoopWindowTarget,
+};
 
 pub const DEFAULT_CARET_WIDTH: f64 = 10.0;
 
@@ -140,7 +223,7 @@ impl PlatformWindowImpl {
                         Some(mut x) => {
                             x.push(item.clone());
                             Some(x)
-                        }
+                        },
                         None => item.find_x_term_caret_tree().ok(),
                     });
                 result
@@ -154,6 +237,9 @@ impl PlatformWindowImpl {
 
 impl PlatformStateImpl {
     pub(super) fn new(proxy: EventLoopProxy) -> Self {
+        if let Err(err) = fig_settings::state::set_value("desktop.inputMethodRequired", false) {
+            error!(%err, "Failed initializing the terminal input method requirement");
+        }
         let focused_window: Option<PlatformWindowImpl> = None;
         Self {
             proxy,
@@ -264,21 +350,22 @@ impl PlatformStateImpl {
                         let mut events: Vec<Event> = vec![];
 
                         match result {
-                            WindowServerEvent::FocusChanged { window, app } => {
+                            WindowServerEvent::ApplicationActivated => {
                                 events.push(Event::WindowEvent {
                                     window_id: AUTOCOMPLETE_ID,
-                                    window_event: WindowEvent::Hide,
+                                    window_event: WindowEvent::SetEnabled(false),
                                 });
-
+                            },
+                            WindowServerEvent::FocusChanged { window, app } => {
                                 if let Ok(window) = PlatformWindowImpl::new(app.bundle_id, app.pid, window) {
                                     events.push(Event::PlatformBoundEvent(
                                         PlatformBoundEvent::ExternalWindowFocusChanged { window },
                                     ));
                                 }
-                            }
+                            },
                             WindowServerEvent::WindowDestroyed { app } => {
                                 events.push(Event::PlatformBoundEvent(PlatformBoundEvent::WindowDestroyed { app }));
-                            }
+                            },
                             WindowServerEvent::ActiveSpaceChanged { is_fullscreen } => {
                                 events.extend([
                                     Event::WindowEvent {
@@ -290,12 +377,12 @@ impl PlatformStateImpl {
                                         dashboard_visible: None,
                                     }),
                                 ]);
-                            }
+                            },
                             WindowServerEvent::RequestCaretPositionUpdate => {
                                 events.push(Event::PlatformBoundEvent(
                                     PlatformBoundEvent::CaretPositionUpdateRequested,
                                 ));
-                            }
+                            },
                         };
 
                         for event in events {
@@ -307,7 +394,7 @@ impl PlatformStateImpl {
                 });
 
                 Ok(())
-            }
+            },
             PlatformBoundEvent::InitializePostRun => {
                 fn to_s<'a>(nsstring_obj: *mut Object) -> Option<&'a str> {
                     const UTF8_ENCODING: libc::c_uint = 4;
@@ -393,15 +480,34 @@ impl PlatformStateImpl {
                 );
 
                 Ok(())
-            }
+            },
             PlatformBoundEvent::EditBufferChanged => {
                 if let Err(err) = self.refresh_window_position() {
                     error!(%err, "Failed to refresh window position");
                 }
                 Ok(())
-            }
+            },
             PlatformBoundEvent::ExternalWindowFocusChanged { window } => {
+                if !unsafe {
+                    NSWorkspace::sharedWorkspace()
+                        .frontmostApplication()
+                        .is_some_and(|app| app.processIdentifier() == window.pid)
+                } {
+                    return Ok(());
+                }
+                self.proxy.send_event(Event::WindowEvent {
+                    window_id: AUTOCOMPLETE_ID,
+                    window_event: WindowEvent::Hide,
+                })?;
                 let current_terminal = Terminal::from_bundle_id(window.bundle_id.clone());
+                if let Some(terminal) = current_terminal.as_ref() {
+                    if let Err(err) = fig_settings::state::set_value(
+                        "desktop.inputMethodRequired",
+                        terminal.supports_macos_input_method(),
+                    ) {
+                        error!(%err, "Failed recording the focused terminal's input method requirement");
+                    }
+                }
                 let level = window.get_level();
 
                 if level == Some(0) {
@@ -424,7 +530,7 @@ impl PlatformStateImpl {
                                 } else {
                                     true
                                 }
-                            }
+                            },
                             None => false,
                         };
 
@@ -432,7 +538,6 @@ impl PlatformStateImpl {
                             && terminal_cursor_backing_installed
                             && !fig_settings::settings::get_bool_or("autocomplete.disable", false)
                             && accessibility_is_enabled();
-                        // && fig_request::fig_auth::is_logged_in();
 
                         enabled_proxy
                             .send_event(Event::WindowEvent {
@@ -460,13 +565,13 @@ impl PlatformStateImpl {
                 }
 
                 Ok(())
-            }
+            },
             PlatformBoundEvent::CaretPositionUpdateRequested => {
                 if let Err(e) = self.refresh_window_position() {
                     debug!(%e, "Failed to refresh window position");
                 }
                 Ok(())
-            }
+            },
             PlatformBoundEvent::FullscreenStateUpdated {
                 fullscreen,
                 dashboard_visible,
@@ -494,7 +599,7 @@ impl PlatformStateImpl {
                     window_target.set_activation_policy_at_runtime(policy);
                 }
                 Ok(())
-            }
+            },
             PlatformBoundEvent::AccessibilityUpdateRequested => {
                 let proxy = self.proxy.clone();
                 tokio::runtime::Handle::current().spawn(async move {
@@ -515,21 +620,9 @@ impl PlatformStateImpl {
                 });
 
                 Ok(())
-            }
+            },
             PlatformBoundEvent::AccessibilityUpdated { enabled } => {
-                let _was_enabled = ACCESSIBILITY_ENABLED.swap(enabled, Ordering::SeqCst);
-                // if enabled && !was_enabled {
-                //     tokio::runtime::Handle::current().spawn(async move {
-                //         fig_telemetry::emit_track(fig_telemetry::TrackEvent::new(
-                //             fig_telemetry::TrackEventType::GrantedAXPermission,
-                //             fig_telemetry::TrackSource::Desktop,
-                //             env!("CARGO_PKG_VERSION").into(),
-                //             std::iter::empty::<(&str, &str)>(),
-                //         ))
-                //         .await
-                //         .ok();
-                //     });
-                // }
+                ACCESSIBILITY_ENABLED.store(enabled, Ordering::SeqCst);
 
                 let proxy = self.proxy.clone();
                 let notifications_state = notifications_state.clone();
@@ -553,7 +646,7 @@ impl PlatformStateImpl {
                 self.proxy.send_event(Event::ReloadAccessibility).ok();
 
                 Ok(())
-            }
+            },
             PlatformBoundEvent::AppWindowFocusChanged {
                 window_id,
                 focused,
@@ -571,7 +664,7 @@ impl PlatformStateImpl {
                         .ok();
                 }
                 Ok(())
-            }
+            },
             PlatformBoundEvent::WindowDestroyed { app } => {
                 let mut focused = self.focused_window.lock().unwrap();
                 if let Some(focused_window) = focused.as_ref() {
@@ -586,7 +679,7 @@ impl PlatformStateImpl {
                     }
                 }
                 Ok(())
-            }
+            },
         }
     }
 
@@ -606,9 +699,9 @@ impl PlatformStateImpl {
         // .unwrap_or(false);
 
         if !is_xterm && supports_ime {
-            tracing::debug!("Sending notif io.github.haikbvn.termcomplete.edit_buffer_updated");
+            tracing::debug!("Sending notif dev.zevu.autocomplete.edit_buffer_updated");
             NotificationCenter::distributed_center().post_notification(
-                ns_string!("io.github.haikbvn.termcomplete.edit_buffer_updated"),
+                ns_string!("dev.zevu.autocomplete.edit_buffer_updated"),
                 &NSDictionary::new(),
             );
         } else {

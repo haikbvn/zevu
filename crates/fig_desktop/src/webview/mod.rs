@@ -8,7 +8,11 @@ pub mod window_id;
 
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::{Arc, LazyLock, OnceLock};
+use std::sync::{
+    Arc,
+    LazyLock,
+    OnceLock,
+};
 
 use cfg_if::cfg_if;
 use fig_desktop_api::init_script::javascript_init;
@@ -18,39 +22,93 @@ use fig_proto::fig::ClientOriginatedMessage;
 use fig_proto::fig::client_originated_message::Submessage;
 use fig_remote_ipc::figterm::FigtermState;
 use fig_util::consts::PRODUCT_NAME;
-use fig_util::{URL_SCHEMA, directories};
+use fig_util::{
+    URL_SCHEMA,
+    directories,
+};
 use fnv::FnvBuildHasher;
 use muda::MenuEvent;
 use regex::RegexSet;
 use tao::dpi::LogicalSize;
-use tao::event::{Event as WryEvent, StartCause, WindowEvent as WryWindowEvent};
-use tao::event_loop::{ControlFlow, EventLoopBuilder};
-use tao::window::{Theme as TaoTheme, Window, WindowBuilder, WindowId as WryWindowId};
-use tracing::{debug, error, info, trace, warn};
+use tao::event::{
+    Event as WryEvent,
+    StartCause,
+    WindowEvent as WryWindowEvent,
+};
+use tao::event_loop::{
+    ControlFlow,
+    EventLoopBuilder,
+};
+use tao::window::{
+    Theme as TaoTheme,
+    Window,
+    WindowBuilder,
+    WindowId as WryWindowId,
+};
+use tracing::{
+    debug,
+    error,
+    info,
+    trace,
+    warn,
+};
 use url::Url;
 use window::WindowState;
-use wry::{Theme as WryTheme, WebContext, WebView, WebViewBuilder};
+use wry::{
+    Theme as WryTheme,
+    WebContext,
+    WebView,
+    WebViewBuilder,
+};
 
 use self::menu::menu_bar;
 use self::notification::WebviewNotificationsState;
 use self::window_id::DashboardId;
-use crate::event::{Event, ShowMessageNotification, WindowEvent};
-use crate::notification_bus::{JsonNotification, NOTIFICATION_BUS};
-use crate::platform::{PlatformBoundEvent, PlatformState};
-use crate::protocol::{api, icons, resource, spec};
+use crate::event::{
+    Event,
+    ShowMessageNotification,
+    WindowEvent,
+};
+use crate::notification_bus::{
+    JsonNotification,
+    NOTIFICATION_BUS,
+};
+use crate::platform::{
+    PlatformBoundEvent,
+    PlatformState,
+};
+use crate::protocol::{
+    api,
+    icons,
+    resource,
+    spec,
+};
 use crate::remote_ipc::RemoteHook;
 use crate::request::api_request;
-use crate::tray::{self, build_tray, get_context_menu, get_icon};
+use crate::tray::{
+    self,
+    build_tray,
+};
 use crate::webview::window_id::AutocompleteId;
-pub use crate::webview::window_id::{AUTOCOMPLETE_ID, DASHBOARD_ID, WindowId};
-use crate::{EventLoop, EventLoopProxy, InterceptState, file_watcher, local_ipc, utils};
+pub use crate::webview::window_id::{
+    AUTOCOMPLETE_ID,
+    DASHBOARD_ID,
+    WindowId,
+};
+use crate::{
+    EventLoop,
+    EventLoopProxy,
+    InterceptState,
+    file_watcher,
+    local_ipc,
+    utils,
+};
 
 pub const DASHBOARD_SIZE: LogicalSize<f64> = LogicalSize::new(960.0, 720.0);
 pub const DASHBOARD_MINIMUM_SIZE: LogicalSize<f64> = LogicalSize::new(700.0, 480.0);
 
-pub const AUTOCOMPLETE_WINDOW_TITLE: &str = "Termcomplete Autocomplete";
+pub const AUTOCOMPLETE_WINDOW_TITLE: &str = "Zevu Autocomplete";
 
-pub const LOGIN_PATH: &str = "/";
 
 fn map_theme(theme: &str) -> Option<WryTheme> {
     match theme {
@@ -106,7 +164,10 @@ impl WebviewManager {
 
         #[cfg(target_os = "macos")]
         if !visible {
-            use tao::platform::macos::{ActivationPolicy, EventLoopExtMacOS};
+            use tao::platform::macos::{
+                ActivationPolicy,
+                EventLoopExtMacOS,
+            };
 
             use crate::platform::ACTIVATION_POLICY;
 
@@ -350,7 +411,7 @@ impl WebviewManager {
                                         ))
                                         .ok();
                                 }
-                            }
+                            },
                             WryWindowEvent::ThemeChanged(theme) => window_state.set_theme(match theme {
                                 TaoTheme::Light => Some(WryTheme::Light),
                                 TaoTheme::Dark => Some(WryTheme::Dark),
@@ -374,11 +435,11 @@ impl WebviewManager {
                                         visible: window_state.window.is_visible(),
                                     }))
                                     .unwrap();
-                            }
+                            },
                             _ => (),
                         }
                     }
-                }
+                },
                 WryEvent::UserEvent(event) => {
                     match event {
                         Event::WindowEvent {
@@ -402,12 +463,12 @@ impl WebviewManager {
                                         "Ignoring event for disabled window"
                                     );
                                 }
-                            }
+                            },
                             None => {
                                 // TODO(grant): figure out how to handle this gracefully
                                 warn!("No window {window_id} available for event");
                                 trace!(?window_event, "Event");
-                            }
+                            },
                         },
                         Event::WindowEventAll { window_event } => {
                             for (_window_id, window_state) in self.window_id_map.iter() {
@@ -428,34 +489,11 @@ impl WebviewManager {
                                     );
                                 }
                             }
-                        }
+                        },
                         Event::ControlFlow(new_control_flow) => {
                             *control_flow = new_control_flow;
-                        }
-                        Event::ReloadTray { is_logged_in } => {
-                            tray.set_icon(Some(get_icon(is_logged_in)))
-                                .map_err(|err| error!(?err))
-                                .ok();
-                            tray.set_icon_as_template(true);
-                            tray.set_menu(Some(Box::new(get_context_menu(is_logged_in))));
-                        }
-                        Event::ReloadCredentials => {
-                            // tray.set_menu(Some(Box::new(get_context_menu())));
-
-                            let autocomplete_enabled =
-                                !fig_settings::settings::get_bool_or("autocomplete.disable", false)
-                                    && PlatformState::accessibility_is_enabled().unwrap_or(true);
-
-                            proxy
-                                .send_event(Event::WindowEvent {
-                                    window_id: AUTOCOMPLETE_ID,
-                                    window_event: WindowEvent::SetEnabled(autocomplete_enabled),
-                                })
-                                .unwrap();
-                        }
+                        },
                         Event::ReloadAccessibility => {
-                            // tray.set_menu(Some(Box::new(get_context_menu())));
-
                             let autocomplete_enabled =
                                 !fig_settings::settings::get_bool_or("autocomplete.disable", false)
                                     && PlatformState::accessibility_is_enabled().unwrap_or(true);
@@ -466,12 +504,12 @@ impl WebviewManager {
                                     window_event: WindowEvent::SetEnabled(autocomplete_enabled),
                                 })
                                 .unwrap();
-                        }
+                        },
                         Event::SetTrayVisible(visible) => {
                             if let Err(err) = tray.set_visible(visible) {
                                 error!(%err, "Failed to set tray visible");
                             }
-                        }
+                        },
                         Event::PlatformBoundEvent(native_event) => {
                             if let Err(err) = self.platform_state.handle(
                                 native_event,
@@ -481,7 +519,7 @@ impl WebviewManager {
                             ) {
                                 debug!(%err, "Failed to handle native event");
                             }
-                        }
+                        },
                         Event::ShowMessageNotification(ShowMessageNotification {
                             title,
                             body,
@@ -512,9 +550,9 @@ impl WebviewManager {
                                         .ok();
                                 }
                             });
-                        }
+                        },
                     }
-                }
+                },
                 WryEvent::Opened { urls } => {
                     let mut events = Vec::new();
                     for url in urls {
@@ -524,10 +562,10 @@ impl WebviewManager {
                                     events.push(WindowEvent::NavigateRelative {
                                         path: url.path().to_owned().into(),
                                     });
-                                }
+                                },
                                 host => {
                                     error!(?host, "Invalid deep link");
-                                }
+                                },
                             }
                         } else {
                             error!(scheme = %url.scheme(), %url, "Invalid scheme");
@@ -540,8 +578,8 @@ impl WebviewManager {
                     }) {
                         warn!(%err, "Error sending event");
                     }
-                }
-                WryEvent::MainEventsCleared | WryEvent::NewEvents(StartCause::WaitCancelled { .. }) => {}
+                },
+                WryEvent::MainEventsCleared | WryEvent::NewEvents(StartCause::WaitCancelled { .. }) => {},
                 event => trace!(?event, "Unhandled event"),
             }
         });
@@ -567,11 +605,11 @@ where
         Some(true) => {
             trace!("{window_id} allowed url: {url}");
             true
-        }
+        },
         Some(false) | None => {
             warn!("{window_id} denied url: {url}");
             false
-        }
+        },
     }
 }
 
@@ -622,7 +660,7 @@ pub fn build_dashboard(
     let mut url = dashboard::url();
 
     if show_onboarding {
-        url.set_path(LOGIN_PATH);
+        url.set_path("/");
     } else if let Some(page) = page {
         url.set_path(&page);
     }
@@ -708,7 +746,10 @@ pub fn build_autocomplete(
     #[cfg(target_os = "linux")]
     {
         use gtk::gdk::WindowTypeHint;
-        use gtk::traits::{GtkWindowExt, WidgetExt};
+        use gtk::traits::{
+            GtkWindowExt,
+            WidgetExt,
+        };
         use tao::platform::unix::WindowExtUnix;
 
         let gtk_window = window.gtk_window();
@@ -807,28 +848,27 @@ async fn init_webview_notification_listeners(proxy: EventLoopProxy) {
             }
         };};
     }
+    watcher!(
+        settings,
+        "autocomplete.disable",
+        |_notification: JsonNotification, proxy: &EventLoopProxy| {
+            proxy.send_event(Event::ReloadAccessibility).ok();
+        }
+    );
+
 
     #[cfg(target_os = "linux")]
     {
         use fig_integrations::Integration;
-        use fig_integrations::desktop_entry::{AutostartIntegration, should_install_autostart_entry};
-        use fig_settings::{Settings, State};
+        use fig_integrations::desktop_entry::{
+            AutostartIntegration,
+            should_install_autostart_entry,
+        };
+        use fig_settings::{
+            Settings,
+            State,
+        };
 
-        use crate::notification_bus::JsonNotification;
-        watcher!(
-            settings,
-            "autocomplete.disable",
-            |notification: JsonNotification, proxy: &EventLoopProxy| {
-                let enabled = !notification.as_bool().unwrap_or(false);
-                debug!(%enabled, "Autocomplete");
-                proxy
-                    .send_event(Event::WindowEvent {
-                        window_id: AUTOCOMPLETE_ID,
-                        window_event: WindowEvent::SetEnabled(enabled),
-                    })
-                    .unwrap();
-            }
-        );
         watcher!(
             settings,
             "app.launchOnStartup",
@@ -847,7 +887,7 @@ async fn init_webview_notification_listeners(proxy: EventLoopProxy) {
                                 "failed to update the autostart integration installed status to {}", enabled
                             );
                             return;
-                        }
+                        },
                     };
                     if should_install_autostart_entry(&ctx, &settings, &state) {
                         autostart
@@ -950,4 +990,5 @@ async fn init_webview_notification_listeners(proxy: EventLoopProxy) {
                 .unwrap();
         }
     );
+
 }

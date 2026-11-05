@@ -1,8 +1,13 @@
 use std::borrow::Cow;
-use std::io::{self, ErrorKind};
-use std::path::{Path, PathBuf};
+use std::io::{
+    self,
+    ErrorKind,
+};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
-use fig_util::CLI_BINARY_NAME;
 use owo_colors::OwoColorize as _;
 use thiserror::Error;
 
@@ -81,14 +86,10 @@ impl Error {
                 title: format!("Permissions denied for {}", path.display().bold()),
                 message: Some(
                     [
-                        format!(
-                            "To automatically fix the permissions run: {}",
-                            format!("sudo {CLI_BINARY_NAME} debug fix-permissions").magenta()
-                        ),
-                        "".into(),
-                        format!("  Error: {}", inner.red()),
+                        "Choose a writable location or repair the file permissions before retrying.".into(),
+                        format!("Error: {}", inner.red()),
                     ]
-                    .join("\n"),
+                    .join("\n")
                 ),
             },
             err => VerboseMessage {

@@ -8,12 +8,16 @@ use tracing::level_filters::LevelFilter;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::filter::Directive;
 use tracing_subscriber::prelude::*;
-use tracing_subscriber::{EnvFilter, Registry, fmt};
+use tracing_subscriber::{
+    EnvFilter,
+    Registry,
+    fmt,
+};
 
 const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
 const DEFAULT_FILTER: LevelFilter = LevelFilter::ERROR;
 
-static TCOMP_LOG_LEVEL_GLOBAL: Mutex<Option<String>> = Mutex::new(None);
+static Q_LOG_LEVEL_GLOBAL: Mutex<Option<String>> = Mutex::new(None);
 static MAX_LEVEL: Mutex<Option<LevelFilter>> = Mutex::new(None);
 static ENV_FILTER_RELOADABLE_HANDLE: Mutex<Option<tracing_subscriber::reload::Handle<EnvFilter, Registry>>> =
     Mutex::new(None);
@@ -48,7 +52,6 @@ pub struct LogArgs<T: AsRef<Path>> {
 pub struct LogGuard {
     _file_guard: Option<WorkerGuard>,
     _stdout_guard: Option<WorkerGuard>,
-    _mcp_file_guard: Option<WorkerGuard>,
 }
 
 /// Initialize our application level logging using the given LogArgs.
@@ -61,7 +64,6 @@ pub fn initialize_logging<T: AsRef<Path>>(args: LogArgs<T>) -> Result<LogGuard, 
     let filter_layer = create_filter_layer();
     let (reloadable_filter_layer, reloadable_handle) = tracing_subscriber::reload::Layer::new(filter_layer);
     ENV_FILTER_RELOADABLE_HANDLE.lock().unwrap().replace(reloadable_handle);
-    let mcp_path: Option<std::path::PathBuf> = None;
 
     // First we construct the file logging layer if a file name was provided.
     let (file_layer, _file_guard) = match args.log_file_path {
@@ -103,7 +105,7 @@ pub fn initialize_logging<T: AsRef<Path>>(args: LogArgs<T>) -> Result<LogGuard, 
             let file_layer = fmt::layer().with_line_number(true).with_writer(non_blocking);
 
             (Some(file_layer), Some(guard))
-        }
+        },
         None => (None, None),
     };
 
@@ -112,38 +114,6 @@ pub fn initialize_logging<T: AsRef<Path>>(args: LogArgs<T>) -> Result<LogGuard, 
         let (non_blocking, guard) = tracing_appender::non_blocking(std::io::stdout());
         let stdout_layer = fmt::layer().with_line_number(true).with_writer(non_blocking);
         (Some(stdout_layer), Some(guard))
-    } else {
-        (None, None)
-    };
-
-    // Set up for mcp servers layer if we are in chat
-    let (mcp_server_layer, _mcp_file_guard) = if let Some(parent) = mcp_path {
-        let mcp_path = parent.join("mcp.log");
-        if args.delete_old_log_file {
-            std::fs::remove_file(&mcp_path).ok();
-        } else if mcp_path.exists() && std::fs::metadata(&mcp_path)?.len() > MAX_FILE_SIZE {
-            std::fs::remove_file(&mcp_path)?;
-        }
-        let file = if args.delete_old_log_file {
-            File::create(&mcp_path)?
-        } else {
-            File::options().append(true).create(true).open(&mcp_path)?
-        };
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            if let Ok(metadata) = file.metadata() {
-                let mut permissions = metadata.permissions();
-                permissions.set_mode(0o600);
-                file.set_permissions(permissions).ok();
-            }
-        }
-        let (non_blocking, guard) = tracing_appender::non_blocking(file);
-        let file_layer = fmt::layer()
-            .with_line_number(true)
-            .with_writer(non_blocking)
-            .with_filter(EnvFilter::new("mcp=trace"));
-        (Some(file_layer), Some(guard))
     } else {
         (None, None)
     };
@@ -158,21 +128,11 @@ pub fn initialize_logging<T: AsRef<Path>>(args: LogArgs<T>) -> Result<LogGuard, 
         .with(file_layer)
         .with(stdout_layer);
 
-    if let Some(mcp_server_layer) = mcp_server_layer {
-        subscriber.with(mcp_server_layer).init();
-        return Ok(LogGuard {
-            _file_guard,
-            _stdout_guard,
-            _mcp_file_guard,
-        });
-    }
-
     subscriber.init();
 
     Ok(LogGuard {
         _file_guard,
         _stdout_guard,
-        _mcp_file_guard,
     })
 }
 
@@ -183,7 +143,7 @@ pub fn initialize_logging<T: AsRef<Path>>(args: LogArgs<T>) -> Result<LogGuard, 
 ///
 /// Returns a string identifying the current log level.
 pub fn get_log_level() -> String {
-    TCOMP_LOG_LEVEL_GLOBAL.lock().unwrap().clone().unwrap_or_else(|| {
+    Q_LOG_LEVEL_GLOBAL.lock().unwrap().clone().unwrap_or_else(|| {
         fig_os_shim::Env::new()
             .q_log_level()
             .unwrap_or_else(|_| DEFAULT_FILTER.to_string())
@@ -199,7 +159,7 @@ pub fn set_log_level(level: String) -> Result<String, Error> {
     info!("Setting log level to {level:?}");
 
     let old_level = get_log_level();
-    *TCOMP_LOG_LEVEL_GLOBAL.lock().unwrap() = Some(level);
+    *Q_LOG_LEVEL_GLOBAL.lock().unwrap() = Some(level);
 
     let filter_layer = create_filter_layer();
     *MAX_LEVEL.lock().unwrap() = filter_layer.max_level_hint();
@@ -227,14 +187,14 @@ pub fn get_log_level_max() -> LevelFilter {
             let filter_layer = create_filter_layer();
             *MAX_LEVEL.lock().unwrap() = filter_layer.max_level_hint();
             filter_layer.max_level_hint().unwrap_or(DEFAULT_FILTER)
-        }
+        },
     }
 }
 
 fn create_filter_layer() -> EnvFilter {
     let directive = Directive::from(DEFAULT_FILTER);
 
-    let log_level = TCOMP_LOG_LEVEL_GLOBAL
+    let log_level = Q_LOG_LEVEL_GLOBAL
         .lock()
         .unwrap()
         .clone()
@@ -253,7 +213,12 @@ mod tests {
     use std::fs::read_to_string;
     use std::time::Duration;
 
-    use tracing::{debug, error, trace, warn};
+    use tracing::{
+        debug,
+        error,
+        trace,
+        warn,
+    };
 
     use super::*;
 

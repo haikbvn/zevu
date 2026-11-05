@@ -3,7 +3,10 @@ use std::fmt;
 use std::sync::OnceLock;
 
 use fig_os_shim::Context;
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize,
+    Serialize,
+};
 
 /// Terminals that macOS supports
 pub const MACOS_TERMINALS: &[Terminal] = &[
@@ -439,7 +442,7 @@ impl Terminal {
             // TODO: the following line does not account for Android Studio
             _ if bundle.starts_with("com.jetbrains.") | bundle.starts_with("com.google.") => {
                 Terminal::IntelliJ(IntelliJVariant::from_bundle_id(bundle))
-            }
+            },
             _ => return None,
         };
 
@@ -795,7 +798,10 @@ mod tests {
     use std::sync::Arc;
 
     use fig_os_shim::process_info::TestExe;
-    use fig_os_shim::{Os, ProcessInfo};
+    use fig_os_shim::{
+        Os,
+        ProcessInfo,
+    };
 
     use super::*;
 
@@ -810,46 +816,40 @@ mod tests {
     fn test_from_process_info() {
         Terminal::from_process_info(&Context::new(), &MACOS_TERMINALS.to_vec());
 
-        let ctx = make_context(Os::Linux, vec!["tcomp", "fish", "wezterm"]);
+        let ctx = make_context(Os::Linux, vec!["q", "fish", "wezterm"]);
         assert_eq!(
             Terminal::from_process_info(&ctx, &LINUX_TERMINALS.to_vec()),
             Some(Terminal::WezTerm)
         );
 
-        let ctx = make_context(Os::Linux, vec!["tcomp", "bash", "tmux"]);
+        let ctx = make_context(Os::Linux, vec!["q", "bash", "tmux"]);
         assert_eq!(
             Terminal::from_process_info(&ctx, &LINUX_TERMINALS.to_vec()),
             None,
             "Special terminals should return None"
         );
 
-        let ctx = make_context(Os::Linux, vec!["cargo", "cargo", "tcomp", "bash", "tmux", "wezterm"]);
+        let ctx = make_context(Os::Linux, vec!["cargo", "cargo", "q", "bash", "tmux", "wezterm"]);
         assert_eq!(
             Terminal::from_process_info(&ctx, &LINUX_TERMINALS.to_vec()),
             None,
             "Max search depth reached should return None"
         );
 
-        let ctx = make_context(
-            Os::Linux,
-            vec![
-                (Some("tcomp"), None),
-                (Some("python3"), Some("/usr/bin/python3 /usr/bin/terminator")),
-            ],
-        );
+        let ctx = make_context(Os::Linux, vec![
+            (Some("q"), None),
+            (Some("python3"), Some("/usr/bin/python3 /usr/bin/terminator")),
+        ]);
         assert_eq!(
             Terminal::from_process_info(&ctx, &LINUX_TERMINALS.to_vec()),
             Some(Terminal::Terminator),
             "should return terminator"
         );
 
-        let ctx = make_context(
-            Os::Linux,
-            vec![
-                (Some("tcomp"), None),
-                (Some("python3"), Some("/usr/bin/python3 /usr/bin/guake")),
-            ],
-        );
+        let ctx = make_context(Os::Linux, vec![
+            (Some("q"), None),
+            (Some("python3"), Some("/usr/bin/python3 /usr/bin/guake")),
+        ]);
         assert_eq!(
             Terminal::from_process_info(&ctx, &LINUX_TERMINALS.to_vec()),
             Some(Terminal::Guake),

@@ -1,11 +1,7 @@
 import logger from "loglevel";
 import { StoreApi } from "zustand";
 import { Shell } from "@aws/amazon-q-developer-cli-api-bindings";
-import { SpecLocationSource } from "@fig/autocomplete-shared";
-import {
-  SpecLocation,
-  Suggestion,
-} from "@aws/amazon-q-developer-cli-shared/internal";
+import { Suggestion } from "@aws/amazon-q-developer-cli-shared/internal";
 import {
   makeArray,
   longestCommonPrefix,
@@ -95,10 +91,10 @@ const insertString = (
   isFullCompletion: boolean,
 ) => {
   const { command, updateVisibilityPostInsert, parserResult } = state;
-  const { commandIndex, annotations } = parserResult;
+  const { commandIndex } = parserResult;
   const rootCommand = command?.tokens[commandIndex]?.text || "";
 
-  const inserted = sendTextToTerminal(
+  sendTextToTerminal(
     state,
     item,
     text,
@@ -106,30 +102,11 @@ const insertString = (
     rootCommand,
   );
 
-  let specLocation: { location: SpecLocation; name: string } | undefined;
-  annotations.forEach((annotation) => {
-    if ("specLocation" in annotation) {
-      const { specLocation: location, spec } = annotation;
-      specLocation = {
-        location,
-        name: spec.name[0],
-      };
-    }
-  });
 
   if (isFullCompletion) {
     const suggestionName = makeArray(item.name)[0] || "";
     updateAutocompleteIndexFromUserInsert(rootCommand, suggestionName);
   }
-
-  const metadata: Record<string, string | boolean> | null = specLocation
-    ? {
-        specName: specLocation.name,
-        specLocation: specLocation.location.name,
-        specLocationType: specLocation.location.type,
-        spec_is_script: specLocation.location.type === SpecLocationSource.LOCAL,
-      }
-    : null;
 
 
   logger.info("Inserted string, updating visibility");

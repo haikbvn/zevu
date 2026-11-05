@@ -1,8 +1,17 @@
-use std::cmp::{PartialEq, max};
+use std::cmp::{
+    PartialEq,
+    max,
+};
 use std::mem;
-use std::ops::{Index, IndexMut};
+use std::ops::{
+    Index,
+    IndexMut,
+};
 
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize,
+    Serialize,
+};
 
 use super::Row;
 use crate::index::Line;
@@ -279,8 +288,14 @@ impl<T> IndexMut<Line> for Storage<T> {
 mod tests {
     use crate::grid::GridCell;
     use crate::grid::row::Row;
-    use crate::grid::storage::{MAX_CACHE_SIZE, Storage};
-    use crate::index::{Column, Line};
+    use crate::grid::storage::{
+        MAX_CACHE_SIZE,
+        Storage,
+    };
+    use crate::index::{
+        Column,
+        Line,
+    };
     use crate::term::cell::ShellFlags;
 
     impl GridCell for char {

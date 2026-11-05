@@ -1,6 +1,12 @@
-use fig_proto::fig::{NotificationRequest, NotificationType};
+use fig_proto::fig::{
+    NotificationRequest,
+    NotificationType,
+};
 
-use super::{RequestResult, RequestResultImpl};
+use super::{
+    RequestResult,
+    RequestResultImpl,
+};
 use crate::WebviewNotificationsState;
 use crate::webview::WindowId;
 
@@ -51,13 +57,13 @@ fn unsubscribe(
     match state.subscriptions.get(window_id) {
         Some(subscriptions) if !subscriptions.contains_key(&notification_type) => {
             return RequestResult::error(format!("Not subscribed notification type {notification_type:?}",));
-        }
+        },
         None => {
             return RequestResult::error(format!("Not subscribed notification type {notification_type:?}",));
-        }
+        },
         Some(subscriptions) => {
             subscriptions.remove(&notification_type);
-        }
+        },
     }
 
     RequestResult::success()

@@ -3,7 +3,10 @@ use std::sync::LazyLock;
 use dashmap::DashMap;
 use fnv::FnvBuildHasher;
 use serde_json::Value;
-use tokio::sync::broadcast::{self, Receiver, Sender};
+use tokio::sync::broadcast::{
+    Receiver,
+    Sender,
+};
 
 const CHANNEL_SIZE: usize = 8;
 
@@ -74,6 +77,7 @@ impl NotificationBus {
             .subscribe()
     }
 
+
     pub fn send_state(&self, key: impl AsRef<str>, value: JsonNotification) {
         if let Some(tx) = self.state_channels.get(key.as_ref()) {
             tx.send(value).ok();
@@ -85,6 +89,7 @@ impl NotificationBus {
             tx.send(value).ok();
         }
     }
+
 
     pub fn send_state_new(&self, key: impl AsRef<str>, value: &Value) {
         if let Some(tx) = self.state_channels.get(key.as_ref()) {

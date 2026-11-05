@@ -11,9 +11,9 @@ license.workspace = true
 workspace = true
 
 [package.metadata.bundle]
-bundle_name = "TermcompleteInputMethod"
-bundle_identifier = "io.github.haikbvn.termcomplete.inputmethod.cursor"
-input_source_identifier = "io.github.haikbvn.termcomplete.inputmethod.cursor"
+bundle_name = "ZevuInputMethod"
+bundle_identifier = "dev.zevu.inputmethod"
+input_source_identifier = "dev.zevu.inputmethod"
 invisible_in_system_ui = true
 input_method_type = "palette"
 

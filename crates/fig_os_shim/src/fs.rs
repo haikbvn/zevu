@@ -3,8 +3,14 @@ use std::fs::Permissions;
 use std::io;
 #[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::path::{
+    Path,
+    PathBuf,
+};
+use std::sync::{
+    Arc,
+    Mutex,
+};
 
 use tempfile::TempDir;
 use tokio::fs;
@@ -17,7 +23,10 @@ pub struct Fs(inner::Inner);
 mod inner {
     use std::collections::HashMap;
     use std::path::PathBuf;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{
+        Arc,
+        Mutex,
+    };
 
     use tempfile::TempDir;
 

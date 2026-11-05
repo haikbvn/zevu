@@ -1,8 +1,15 @@
 use std::fmt::Display;
 
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize,
+    Serialize,
+};
 
-use crate::{Error, JsonStore, OldSettings};
+use crate::{
+    Error,
+    JsonStore,
+    OldSettings,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -94,15 +101,6 @@ impl IntoIterator for KeyBindings {
 #[cfg(test)]
 mod test {
     use super::*;
-
-    #[test]
-    fn test_load_json() {
-        let json = KeyBindings::load_hardcoded();
-        assert_eq!(json.0.len(), 24);
-
-        assert_eq!(json.0[0].identifier, "insertSelected");
-        assert_eq!(json.0[0].binding, "enter");
-    }
 
     #[test]
     fn test_load_from_json_map() {

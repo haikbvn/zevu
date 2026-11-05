@@ -8,11 +8,14 @@ use serde::Deserialize;
 use tracing::debug;
 
 use crate::error::Result;
-use crate::{Error, Integration};
+use crate::{
+    Error,
+    Integration,
+};
 
-const PLUGIN_SLUG: &str = "jetbrains-extension";
-const PLUGIN_JAR: &str = "jetbrains-extension-2.0.0.jar";
-static PLUGIN_CONTENTS: &[u8] = include_bytes!("instrumented-codewhisperer-for-command-line-companion-1.0.4.jar");
+const PLUGIN_SLUG: &str = "zevu-terminal-companion";
+const PLUGIN_JAR: &str = "zevu-terminal-companion-0.2.0.jar";
+static PLUGIN_CONTENTS: &[u8] = include_bytes!("instrumented-zevu-terminal-companion-0.2.0.jar");
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]

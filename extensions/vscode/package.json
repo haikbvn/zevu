@@ -1,9 +1,9 @@
 {
-  "name": "codewhisperer-for-command-line-companion",
-  "version": "1.0.0",
+  "name": "zevu-terminal-companion",
+  "version": "0.2.0",
   "private": true,
-  "displayName": "Amazon Q for command line",
-  "description": "The IDE companion extension for the Amazon Q for command line desktop app",
+  "displayName": "Zevu Terminal Companion",
+  "description": "Terminal focus integration for the Zevu autocomplete desktop app",
   "icon": "images/icon.png",
   "engines": {
     "vscode": "^1.80.0"
@@ -19,17 +19,27 @@
       "supported": true
     }
   },
-  "bugs": {
-    "url": "https://github.com/aws/q-command-line-discussions"
-  },
-  "publisher": "amazonwebservices",
+  "publisher": "zevu",
   "main": "./extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Zevu",
+      "properties": {
+        "zevu.cliPath": {
+          "type": "string",
+          "default": "/Applications/Zevu.app/Contents/MacOS/zevu",
+          "scope": "machine",
+          "description": "Absolute path to the Zevu CLI executable."
+        }
+      }
+    }
+  },
   "scripts": {
     "lint": "eslint .",
     "pretest": "npm run lint",
     "test": "node ./test/runTest.js",
     "build": "vsce package --skip-license --allow-missing-repository",
-    "build-install": "pnpm run build && code --install-extension codewhisperer-for-command-line-companion-*.vsix"
+    "build-install": "pnpm run build && code --install-extension zevu-terminal-companion-0.2.0.vsix"
   },
   "fig": {
     "build": {

@@ -361,6 +361,12 @@ __bp_install() {
 # after our session has started. This allows bash-preexec to be included
 # at any point in our bash profile.
 __bp_install_after_session_init() {
+    # Scheduling twice would clear the DEBUG trap after the first install.
+    if [[ "${PROMPT_COMMAND[*]:-}" == *"$__bp_install_string"* ||
+          "${PROMPT_COMMAND[*]:-}" == *"__bp_precmd_invoke_cmd"* ]]; then
+        return 0
+    fi
+
     # bash-preexec needs to modify these variables in order to work correctly
     # if it can't, just stop the installation
     __bp_require_not_readonly PROMPT_COMMAND HISTCONTROL HISTTIMEFORMAT || return

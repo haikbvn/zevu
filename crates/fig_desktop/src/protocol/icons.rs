@@ -3,23 +3,45 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::hash::Hash;
 use std::io::Cursor;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, LazyLock};
+use std::path::{
+    Path,
+    PathBuf,
+};
+use std::sync::{
+    Arc,
+    LazyLock,
+};
 use std::time::Duration;
 
 use anyhow::Result;
 use fig_os_shim::Context;
 use image::imageops::FilterType;
-use image::{GenericImage, GenericImageView, ImageFormat, Rgba};
+use image::{
+    GenericImage,
+    GenericImageView,
+    ImageFormat,
+    Rgba,
+};
 use moka::future::Cache;
 use percent_encoding::percent_decode_str;
-use tracing::{debug, trace, warn};
+use tracing::{
+    debug,
+    trace,
+    warn,
+};
 use url::Url;
 use wry::http::header::CONTENT_TYPE;
-use wry::http::{Request, Response, StatusCode};
+use wry::http::{
+    Request,
+    Response,
+    StatusCode,
+};
 
 use crate::platform::PlatformState;
-use crate::protocol::util::{parse_hex_rgb, scale_u8};
+use crate::protocol::util::{
+    parse_hex_rgb,
+    scale_u8,
+};
 use crate::webview::WindowId;
 
 const DEFAULT_ICON: &str = "template";
@@ -189,7 +211,7 @@ pub async fn handle(
             let mut png_bytes = std::io::Cursor::new(Vec::new());
             image.write_to(&mut png_bytes, image::ImageFormat::Png).unwrap();
             Some(build_asset_response(png_bytes.into_inner().into(), AssetKind::Png))
-        }
+        },
         Some("icon" | "asset") => match pairs.get("asset").or_else(|| pairs.get("type")) {
             Some(name) => Some(cached_asset_response(&AssetSpecifier::Named(Cow::Borrowed(name)), None).await),
             None => None,
@@ -223,15 +245,15 @@ pub async fn handle(
                         warn!(%path_str, "Unknown file type");
                         None
                     }
-                }
+                },
                 Err(err) => {
                     warn!(%path_str, %err, "Failed to stat path");
                     Some(if path_str.ends_with('/') { "folder" } else { "file" })
-                }
+                },
             };
 
             Some(cached_asset_response(&AssetSpecifier::PathBased(Cow::Borrowed(path)), fallback).await)
-        }
+        },
         _ => None,
     };
 
@@ -264,7 +286,7 @@ fn transform_unix_to_windows_path(path: Cow<'_, str>) -> Cow<'_, Path> {
             }
 
             Cow::from(PathBuf::from(root))
-        }
+        },
         _ => match path {
             Cow::Borrowed(path) => Cow::Borrowed(Path::new(path)),
             Cow::Owned(path) => Cow::Owned(PathBuf::from(path)),

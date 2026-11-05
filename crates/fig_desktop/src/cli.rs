@@ -1,14 +1,11 @@
 use clap::Parser;
 
 #[derive(Parser, Debug)]
-#[command(name = "tcomp-desktop", version, about = "Termcomplete desktop application")]
+#[command(version, about, long_about = None)]
 pub struct Cli {
     /// Do not launch the dashboard when starting
     #[arg(long)]
     pub no_dashboard: bool,
-    /// Run without preparing helper links (for isolated diagnostics).
-    #[arg(long)]
-    pub no_install: bool,
     /// Checks the `app.launchOnStartup` setting before launching
     #[arg(long)]
     pub is_startup: bool,
@@ -18,9 +15,6 @@ pub struct Cli {
     /// Allow launching multiple instances of `fig_desktop`
     #[arg(long)]
     pub allow_multiple: bool,
-    /// Don't attempt to update right away
-    #[arg(long)]
-    pub ignore_immediate_update: bool,
     /// Url to open
     pub url_link: Option<String>,
 }

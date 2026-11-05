@@ -1,13 +1,25 @@
 use std::time::Duration;
 
 use base64::prelude::*;
-use fig_os_shim::{ContextArcProvider, ContextProvider, EnvProvider, FsProvider};
+use fig_os_shim::{
+    ContextArcProvider,
+    ContextProvider,
+    EnvProvider,
+    FsProvider,
+};
 pub use fig_proto::fig::client_originated_message::Submessage as ClientOriginatedSubMessage;
 pub use fig_proto::fig::server_originated_message::Submessage as ServerOriginatedSubMessage;
 use fig_proto::fig::{
-    AggregateSessionMetricActionRequest, ClientOriginatedMessage, DragWindowRequest, InsertTextRequest,
-    NotificationRequest, OnboardingRequest, PositionWindowRequest, RunProcessRequest, ServerOriginatedMessage,
-    UpdateApplicationPropertiesRequest, UserLogoutRequest, WindowFocusRequest,
+    ClientOriginatedMessage,
+    DragWindowRequest,
+    InsertTextRequest,
+    NotificationRequest,
+    OnboardingRequest,
+    PositionWindowRequest,
+    RunProcessRequest,
+    ServerOriginatedMessage,
+    UpdateApplicationPropertiesRequest,
+    WindowFocusRequest,
 };
 use fig_proto::prost::Message;
 use fig_settings::settings::SettingsProvider;
@@ -16,7 +28,11 @@ use tracing::warn;
 
 use crate::error::Result;
 use crate::kv::KVStore;
-use crate::requests::{self, RequestResult, RequestResultImpl};
+use crate::requests::{
+    self,
+    RequestResult,
+    RequestResultImpl,
+};
 
 pub struct Wrapped<Ctx, Req> {
     pub message_id: i64,
@@ -33,13 +49,6 @@ pub trait EventHandler {
     }
 
     async fn insert_text(&self, request: Wrapped<Self::Ctx, InsertTextRequest>) -> RequestResult {
-        RequestResult::unimplemented(request.request)
-    }
-
-    async fn aggregate_session_metric_action(
-        &self,
-        request: Wrapped<Self::Ctx, AggregateSessionMetricActionRequest>,
-    ) -> RequestResult {
         RequestResult::unimplemented(request.request)
     }
 
@@ -63,14 +72,6 @@ pub trait EventHandler {
         &self,
         request: Wrapped<Self::Ctx, UpdateApplicationPropertiesRequest>,
     ) -> RequestResult {
-        RequestResult::unimplemented(request.request)
-    }
-
-    // TODO: rename EventHandler to RequestHandler, and move this callback out
-    // to a separate trait.
-    async fn user_logged_in_callback(&self, _context: Self::Ctx) {}
-
-    async fn user_logout(&self, request: Wrapped<Self::Ctx, UserLogoutRequest>) -> RequestResult {
         RequestResult::unimplemented(request.request)
     }
 
@@ -144,12 +145,29 @@ where
     match message.submessage {
         Some(submessage) => {
             use ClientOriginatedSubMessage::{
-                AppendToFileRequest, ContentsOfDirectoryRequest, CreateDirectoryRequest,
-                DestinationOfSymbolicLinkRequest, DragWindowRequest, GetLocalStateRequest, GetPlatformInfoRequest,
-                GetSettingsPropertyRequest, HistoryQueryRequest, InsertTextRequest, InstallRequest,
-                NotificationRequest, OnboardingRequest, OpenInExternalApplicationRequest, PingRequest,
-                PositionWindowRequest, ReadFileRequest, RunProcessRequest, UpdateApplicationPropertiesRequest,
-                UpdateLocalStateRequest, UpdateSettingsPropertyRequest, WindowFocusRequest, WriteFileRequest,
+                AppendToFileRequest,
+                ContentsOfDirectoryRequest,
+                CreateDirectoryRequest,
+                DestinationOfSymbolicLinkRequest,
+                DragWindowRequest,
+                GetLocalStateRequest,
+                GetPlatformInfoRequest,
+                GetSettingsPropertyRequest,
+                HistoryQueryRequest,
+                InsertTextRequest,
+                InstallRequest,
+                NotificationRequest,
+                OnboardingRequest,
+                OpenInExternalApplicationRequest,
+                PingRequest,
+                PositionWindowRequest,
+                ReadFileRequest,
+                RunProcessRequest,
+                UpdateApplicationPropertiesRequest,
+                UpdateLocalStateRequest,
+                UpdateSettingsPropertyRequest,
+                WindowFocusRequest,
+                WriteFileRequest,
             };
             use requests::*;
 
@@ -162,7 +180,7 @@ where
                 AppendToFileRequest(request) => fs::append_to_file(request, ctx.env()).await,
                 DestinationOfSymbolicLinkRequest(request) => {
                     requests::fs::destination_of_symbolic_link(request, ctx.env()).await
-                }
+                },
                 ContentsOfDirectoryRequest(request) => fs::contents_of_directory(request, ctx.env()).await,
                 CreateDirectoryRequest(request) => fs::create_directory_request(request, ctx.env(), ctx.fs()).await,
                 // notifications
@@ -172,15 +190,13 @@ where
                 // properties
                 UpdateApplicationPropertiesRequest(request) => {
                     event_handler.update_application_properties(request!(request)).await
-                }
+                },
                 // state
                 GetLocalStateRequest(request) => state::get(request).await,
                 UpdateLocalStateRequest(request) => state::update(request).await,
                 // settings
                 GetSettingsPropertyRequest(request) => settings::get(request).await,
                 UpdateSettingsPropertyRequest(request) => settings::update(request).await,
-                // telemetry
-
                 // window
                 PositionWindowRequest(request) => event_handler.position_window(request!(request)).await,
                 WindowFocusRequest(request) => event_handler.window_focus(request!(request)).await,
@@ -195,12 +211,11 @@ where
                 OpenInExternalApplicationRequest(request) => other::open_in_external_application(request).await,
                 PingRequest(request) => other::ping(request),
                 GetPlatformInfoRequest(request) => platform::get_platform_info(request, &ctx).await,
-                _ => RequestResult::error("This API is unavailable in Termcomplete"),
             }
-        }
+        },
         None => {
             warn!("Missing submessage: {message:?}");
             RequestResult::error("Missing submessage")
-        }
+        },
     }
 }

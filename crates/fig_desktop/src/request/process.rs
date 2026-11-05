@@ -1,10 +1,19 @@
 use std::time::Duration;
 
 use fig_proto::fig::server_originated_message::Submessage as ServerOriginatedSubMessage;
-use fig_proto::fig::{RunProcessRequest, RunProcessResponse};
+use fig_proto::fig::{
+    RunProcessRequest,
+    RunProcessResponse,
+};
 use fig_proto::remote::hostbound;
-use fig_remote_ipc::figterm::{FigtermCommand, FigtermState};
-use fig_util::env_var::{PROCESS_LAUNCHED_BY_TCOMP, TCOMP_TERM};
+use fig_remote_ipc::figterm::{
+    FigtermCommand,
+    FigtermState,
+};
+use fig_util::env_var::{
+    PROCESS_LAUNCHED_BY_Q,
+    Q_TERM,
+};
 use tokio::process::Command;
 use tokio::time::timeout;
 use tracing::debug;
@@ -13,8 +22,8 @@ use uuid::Uuid;
 use super::RequestResult;
 
 fn set_fig_vars(cmd: &mut Command) {
-    cmd.env(TCOMP_TERM, env!("CARGO_PKG_VERSION"));
-    cmd.env(PROCESS_LAUNCHED_BY_TCOMP, "1");
+    cmd.env(Q_TERM, env!("CARGO_PKG_VERSION"));
+    cmd.env(PROCESS_LAUNCHED_BY_Q, "1");
 
     cmd.env("HISTFILE", "");
     cmd.env("HISTCONTROL", "ignoreboth");

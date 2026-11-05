@@ -1,10 +1,21 @@
-use fig_log::{LogArgs, initialize_logging};
+use fig_log::{
+    LogArgs,
+    initialize_logging,
+};
 use fig_util::directories;
 use objc2::rc::autoreleasepool;
 use objc2::runtime::Bool;
-use objc2::{ClassType, msg_send};
+use objc2::{
+    ClassType,
+    msg_send,
+};
 use objc2_app_kit::NSApp;
-use objc2_foundation::{MainThreadMarker, NSBundle, NSObject, ns_string};
+use objc2_foundation::{
+    MainThreadMarker,
+    NSBundle,
+    NSObject,
+    ns_string,
+};
 use tracing::info;
 
 use crate::imk;
@@ -36,8 +47,7 @@ pub async fn main() {
         let identifier = unsafe { bundle.bundleIdentifier() };
 
         info!("Attempting connection...");
-        let server = imk::connect_imkserver(k_connection_name, identifier.as_deref())
-            .expect("macOS could not create the cursor helper's input server");
+        imk::connect_imkserver(k_connection_name, identifier.as_deref());
         info!("Connected!");
 
         let app_id: &NSObject = app.as_ref();
@@ -45,7 +55,5 @@ pub async fn main() {
         info!("RUNNING {loaded_nib:?}!");
 
         unsafe { app.run() };
-        // IMKServer owns the service connection for the lifetime of the helper.
-        drop(server);
     });
 }

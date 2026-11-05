@@ -1,7 +1,14 @@
 use anstream::println;
-use clap::{ArgGroup, Args, Subcommand};
+use clap::{
+    ArgGroup,
+    Args,
+    Subcommand,
+};
 use crossterm::style::Stylize;
-use eyre::{Result, eyre};
+use eyre::{
+    Result,
+    eyre,
+};
 use fig_ipc::local::restart_settings_listener;
 use fig_util::PRODUCT_NAME;
 use serde_json::json;
@@ -55,11 +62,11 @@ impl LocalStateArgs {
                 Ok(()) => {
                     println!("\nState listener restarted\n");
                     Ok(())
-                }
+                },
                 Err(err) => {
                     print_connection_error!();
                     Err(err.into())
-                }
+                },
             },
             Some(LocalStateSubcommand::All { format }) => {
                 let state = fig_settings::state::all()?;
@@ -68,15 +75,15 @@ impl LocalStateArgs {
                         for (key, value) in state.iter() {
                             println!("{key} = {value}");
                         }
-                    }
+                    },
                     OutputFormat::Json => println!("{}", serde_json::to_string(&state)?),
                     OutputFormat::JsonPretty => {
                         println!("{}", serde_json::to_string_pretty(&state)?);
-                    }
+                    },
                 }
 
                 Ok(())
-            }
+            },
             None => match &self.key {
                 Some(key) => match (&self.value, self.delete) {
                     (None, false) => match fig_settings::state::get_value(key)? {
@@ -90,26 +97,26 @@ impl LocalStateArgs {
                                 OutputFormat::JsonPretty => println!("{value:#}"),
                             }
                             Ok(())
-                        }
+                        },
                         None => match self.format {
                             OutputFormat::Plain => Err(eyre::eyre!("No value associated with {key}")),
                             OutputFormat::Json | OutputFormat::JsonPretty => {
                                 println!("null");
                                 Ok(())
-                            }
+                            },
                         },
                     },
                     (None, true) => {
                         fig_settings::state::remove_value(key)?;
                         println!("Successfully updated state");
                         Ok(())
-                    }
+                    },
                     (Some(value), false) => {
                         let value: serde_json::Value = serde_json::from_str(value).unwrap_or_else(|_| json!(value));
                         fig_settings::state::set_value(key, value)?;
                         println!("Successfully updated state");
                         Ok(())
-                    }
+                    },
                     (Some(_), true) => Err(eyre!("Cannot delete a value with a value")),
                 },
                 None => Err(eyre!("No key specified")),

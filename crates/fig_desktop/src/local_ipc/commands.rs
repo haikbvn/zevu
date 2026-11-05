@@ -1,11 +1,24 @@
 use std::sync::Mutex;
 
-use fig_os_shim::{Context, ContextArcProvider, ContextProvider};
+use fig_os_shim::{
+    Context,
+    ContextArcProvider,
+    ContextProvider,
+};
 use fig_proto::local::command_response::Response as CommandResponseTypes;
 use fig_proto::local::dump_state_command::Type as DumpStateType;
 use fig_proto::local::{
-    BundleMetadataResponse, DebugModeCommand, DiagnosticsCommand, DiagnosticsResponse, DumpStateCommand,
-    DumpStateResponse, LogLevelCommand, LogLevelResponse, OpenBrowserCommand, OpenUiElementCommand, QuitCommand,
+    BundleMetadataResponse,
+    DebugModeCommand,
+    DiagnosticsCommand,
+    DiagnosticsResponse,
+    DumpStateCommand,
+    DumpStateResponse,
+    LogLevelCommand,
+    LogLevelResponse,
+    OpenBrowserCommand,
+    OpenUiElementCommand,
+    QuitCommand,
     UiElement,
 };
 use fig_remote_ipc::figterm::FigtermState;
@@ -14,12 +27,22 @@ use fig_settings::settings::SettingsProvider;
 use tao::event_loop::ControlFlow;
 use tracing::error;
 
-use super::{LocalResponse, LocalResult};
-use crate::event::{Event, WindowEvent};
+use super::{
+    LocalResponse,
+    LocalResult,
+};
+use crate::event::{
+    Event,
+    WindowEvent,
+};
 use crate::platform::PlatformState;
-use crate::webview::DASHBOARD_SIZE;
 use crate::webview::notification::WebviewNotificationsState;
-use crate::{AUTOCOMPLETE_ID, DASHBOARD_ID, EventLoopProxy, platform};
+use crate::{
+    AUTOCOMPLETE_ID,
+    DASHBOARD_ID,
+    EventLoopProxy,
+    platform,
+};
 
 pub async fn debug(command: DebugModeCommand, proxy: &EventLoopProxy) -> LocalResult {
     static DEBUG_MODE: Mutex<bool> = Mutex::new(false);
@@ -28,13 +51,13 @@ pub async fn debug(command: DebugModeCommand, proxy: &EventLoopProxy) -> LocalRe
         Some(b) => {
             *DEBUG_MODE.lock().unwrap() = b;
             b
-        }
+        },
         None => match command.toggle_debug_mode {
             Some(true) => {
                 let mut locked_debug = DEBUG_MODE.lock().unwrap();
                 *locked_debug = !*locked_debug;
                 *locked_debug
-            }
+            },
             _ => *DEBUG_MODE.lock().unwrap(),
         },
     };
@@ -114,7 +137,7 @@ pub async fn open_ui_element(command: OpenUiElementCommand, proxy: &EventLoopPro
                     ]),
                 })
                 .unwrap();
-        }
+        },
         UiElement::MissionControl => {
             let events = if let Some(path) = command.route {
                 vec![WindowEvent::NavigateRelative { path: path.into() }, WindowEvent::Show]
@@ -128,7 +151,7 @@ pub async fn open_ui_element(command: OpenUiElementCommand, proxy: &EventLoopPro
                     window_event: WindowEvent::Batch(events),
                 })
                 .unwrap();
-        }
+        },
         UiElement::MenuBar => error!("Opening menu bar is unimplemented"),
         UiElement::InputMethodPrompt => error!("Opening input method prompt is unimplemented"),
     };
@@ -183,6 +206,7 @@ pub fn log_level(LogLevelCommand { level }: LogLevelCommand) -> LocalResult {
     ))))
 }
 
+
 pub fn dump_state(
     command: DumpStateCommand,
     figterm_state: &FigtermState,
@@ -192,12 +216,12 @@ pub fn dump_state(
     let json = match command.r#type() {
         DumpStateType::DumpStateFigterm => {
             serde_json::to_string_pretty(&figterm_state).unwrap_or_else(|err| format!("unable to dump: {err}"))
-        }
+        },
         DumpStateType::DumpStateWebNotifications => serde_json::to_string_pretty(&webview_notifications_state)
             .unwrap_or_else(|err| format!("unable to dump: {err}")),
         DumpStateType::DumpStatePlatform => {
             serde_json::to_string_pretty(&platform_state).unwrap_or_else(|err| format!("unable to dump: {err}"))
-        }
+        },
     };
 
     LocalResult::Ok(LocalResponse::Message(Box::new(CommandResponseTypes::DumpState(
@@ -205,28 +229,6 @@ pub fn dump_state(
     ))))
 }
 
-#[allow(unused_variables)]
-pub async fn connect_to_ibus(proxy: EventLoopProxy, platform_state: &PlatformState) -> LocalResult {
-    cfg_if::cfg_if! {
-        if #[cfg(target_os = "linux")] {
-            use crate::platform::ibus::launch_ibus_connection;
-            match launch_ibus_connection(proxy, platform_state.inner()).await {
-                Ok(_) => Ok(LocalResponse::Success(None)),
-                Err(err) => {
-                    Err(LocalResponse::Error {
-                        code: None,
-                        message: Some(format!("Failed connecting to ibus: {:?}", err)),
-                    })
-                },
-            }
-        } else {
-            Err(LocalResponse::Error {
-                code: None,
-                message: Some("Connecting to IBus is only supported on Linux".to_owned()),
-            })
-        }
-    }
-}
 
 pub async fn bundle_metadata(ctx: &Context) -> LocalResult {
     match fig_util::manifest::bundle_metadata_json(ctx).await {
@@ -238,28 +240,4 @@ pub async fn bundle_metadata(ctx: &Context) -> LocalResult {
             message: Some(format!("Failed to get the bundled metadata: {:?}", err)),
         }),
     }
-}
-
-/// Keep helper activation in the GUI process and its main-thread run loop.
-pub async fn input_method(command: fig_proto::local::InputMethodCommand) -> LocalResult {
-    use fig_integrations::Integration;
-    use fig_proto::local::InputMethodAction;
-    let input = fig_integrations::input_method::InputMethod::default();
-    let result = match command.actions() {
-        InputMethodAction::Install => input.install().await,
-        InputMethodAction::Uninstall => input.uninstall().await,
-        InputMethodAction::StatusOf => input.is_installed().await,
-        _ => {
-            return Err(LocalResponse::Error {
-                code: None,
-                message: Some("Use install or uninstall to manage the cursor helper".into()),
-            });
-        }
-    };
-    result
-        .map(|_| LocalResponse::Success(None))
-        .map_err(|error| LocalResponse::Error {
-            code: None,
-            message: Some(error.to_string()),
-        })
 }

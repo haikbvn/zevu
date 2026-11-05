@@ -1,7 +1,7 @@
 use clap::Parser;
 
 #[derive(Debug, Parser, PartialEq, Eq)]
-#[command(name = "tcomp-term", version, about = "Termcomplete terminal integration")]
+#[command(version, about)]
 pub struct Cli {
     #[arg(last = true)]
     pub command: Option<Vec<String>>,
@@ -23,11 +23,8 @@ mod tests {
         assert_eq!(cli, Cli { command: None });
 
         let cli = Cli::parse_from(["figterm", "--", "exe", "arg1", "arg2"]);
-        assert_eq!(
-            cli,
-            Cli {
-                command: Some(vec!["exe".into(), "arg1".into(), "arg2".into()])
-            }
-        );
+        assert_eq!(cli, Cli {
+            command: Some(vec!["exe".into(), "arg1".into(), "arg2".into()])
+        });
     }
 }

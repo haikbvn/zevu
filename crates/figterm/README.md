@@ -13,23 +13,41 @@ prompts (precmd), and right before a command is executed (preexec)
 
 ## Installation/Usage
 
-First, make sure shell integrations are installed. You can use the `q_cli` to do
-this:
+Install the local Zevu shell integrations using the bundled CLI:
 
+```sh
+zevu integrations install dotfiles
 ```
-q integrations install dotfiles
+
+The shell integrations launch `zevu-term` for each terminal session. The installed
+binary is built from this crate; its internal Cargo binary name remains `figterm`.
+The shell runs as its child, with `Q_TERM` identifying the active PTY session.
+
+The PTY keeps local history, normal shell input, completion insertion, generator
+requests and prompt/preexec/postexec/edit-buffer hooks. It connects to the desktop
+over the local Unix socket; no inline AI, telemetry, updater or SSH installation
+is part of this runtime.
+
+## Isolated shell regression tests
+
+Build the debug CLI and PTY before running the behavior suite:
+
+```sh
+cargo build --locked -p q_cli -p figterm
+cargo test --locked -p figterm2 -- --test-threads=1
 ```
 
-The run `make install` to build the binary and move to the right location.
+The three enabled tests require `/bin/zsh` and Homebrew Bash/Fish (resolved using
+`brew --prefix`); a missing shell is an error, not a skipped test. Each test runs
+`target/debug/figterm -- <shell> -i` under a real PTY. A private temporary HOME,
+XDG directories, ZDOTDIR, TMPDIR and PATH isolate user profiles and sockets.
+Fixture startup files evaluate the real `zevu init <shell> pre/post` output, with
+`zevu` linked to `target/debug/q_cli`.
 
-The shell integrations will then launch figterm on each terminal session.
-
-You can verify figterm is running by:
-
-1. Running `pstree -p $$` and checking, e.g. for a `figterm` process with a
-   child `zsh` process.
-2. Running `env | grep FIG` and checking the `Q_TERM` variable is set to
-3.
+The harness continuously drains output and waits for real hooks/prompts with a
+deadline, rather than assuming startup finishes after a fixed sleep. Assertions
+cover edit-buffer text and byte cursor, backspace, Unicode, mid-line replacement,
+wrapped-buffer resize, actual shell output and preexec/postexec/prompt lifecycle.
 
 ## How does it work?
 

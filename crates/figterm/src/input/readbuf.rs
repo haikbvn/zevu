@@ -1,4 +1,7 @@
-use memmem::{Searcher, TwoWaySearcher};
+use memmem::{
+    Searcher,
+    TwoWaySearcher,
+};
 
 /// This is a simple, small, read buffer that always has the buffer
 /// contents available as a contiguous slice.

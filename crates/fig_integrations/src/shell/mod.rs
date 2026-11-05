@@ -1,49 +1,38 @@
-use std::fs::File;
-use std::io::{ErrorKind, Write};
-use std::path::PathBuf;
+use std::borrow::Cow;
+use std::io::{
+    ErrorKind,
+    Write,
+};
+use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use cfg_if::cfg_if;
 use clap::ValueEnum;
 use fig_os_shim::Env;
-use fig_util::{CLI_BINARY_NAME, PRODUCT_NAME, PTY_BINARY_NAME, Shell, directories};
-use regex::{Regex, RegexSet};
-use serde::{Deserialize, Serialize};
+use fig_util::{
+    CLI_BINARY_NAME,
+    PRODUCT_NAME,
+    PTY_BINARY_NAME,
+    Shell,
+    directories,
+};
+use regex::Regex;
+use serde::{
+    Deserialize,
+    Serialize,
+};
 
-use crate::error::{ErrorExt, Result};
-use crate::{Error, FileIntegration, Integration, backup_file};
+use crate::error::{
+    ErrorExt,
+    Result,
+};
+use crate::{
+    Error,
+    FileIntegration,
+    Integration,
+    backup_file,
+};
 
-pub mod inline_shell_completion_plugin {
-    pub const ZSH_SCRIPT: &str = concat!(
-        "\n",
-        include_str!(concat!(env!("OUT_DIR"), "/inline_shell_completion.zsh")),
-        "\n"
-    );
-
-    #[cfg(test)]
-    mod tests {
-        use fig_util::CLI_BINARY_NAME;
-
-        use super::*;
-
-        #[test]
-        fn script_checks() {
-            // Ensure script has license
-            assert!(ZSH_SCRIPT.contains("Copyright"));
-
-            // Ensure script has _q_autosuggest_strategy_inline_shell_completion()
-            let cli_binary_name_underscore = CLI_BINARY_NAME.replace('-', "_");
-            assert!(ZSH_SCRIPT.contains(&format!(
-                "_{cli_binary_name_underscore}_autosuggest_strategy_inline_shell_completion()"
-            )));
-
-            // Ensure script adds precmd hook
-            assert!(ZSH_SCRIPT.contains(&format!(
-                "add-zsh-hook precmd _{cli_binary_name_underscore}_autosuggest_start"
-            )));
-        }
-    }
-}
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -74,9 +63,31 @@ fn integration_file_name(dotfile_name: &str, when: &When, shell: &Shell) -> Stri
     )
 }
 
+/// Locate an executable shell even when a GUI launch omits Homebrew from PATH.
+pub fn shell_executable(shell: Shell, env: &Env) -> Option<PathBuf> {
+    let mut directories: Vec<PathBuf> = env.get_os("PATH")
+        .map(|path| std::env::split_paths(&path).collect())
+        .unwrap_or_default();
+    #[cfg(target_os = "macos")]
+    directories.extend(["/opt/homebrew/bin", "/usr/local/bin", "/bin", "/usr/bin"].map(PathBuf::from));
+    directories.into_iter().map(|directory| directory.join(shell.as_str())).find(|path| {
+        if !path.is_file() {
+            return false;
+        }
+        #[cfg(unix)]
+        {
+            nix::unistd::access(path.as_path(), nix::unistd::AccessFlags::X_OK).is_ok()
+        }
+        #[cfg(not(unix))]
+        {
+            true
+        }
+    })
+}
+
 pub trait ShellExt {
     fn get_shell_integrations(&self, env: &Env) -> Result<Vec<Box<dyn ShellIntegration>>>;
-    /// Script integrations are installed into ~/.fig/shell
+    /// Script integrations are installed into the Zevu data directory.
     fn get_script_integrations(&self) -> Result<Vec<ShellScriptShellIntegration>>;
     fn get_fig_integration_source(&self, when: &When) -> String;
 }
@@ -133,7 +144,7 @@ impl ShellExt for Shell {
                         }) as Box<dyn ShellIntegration>
                     })
                     .collect()
-            }
+            },
             Shell::Zsh => vec![".zshrc", ".zprofile"]
                 .into_iter()
                 .map(|filename| {
@@ -152,15 +163,15 @@ impl ShellExt for Shell {
                     Box::new(ShellScriptShellIntegration {
                         when: When::Pre,
                         shell: *self,
-                        path: fish_config_dir.join("00_fig_pre.fish"),
+                        path: fish_config_dir.join("00_zevu_pre.fish"),
                     }),
                     Box::new(ShellScriptShellIntegration {
                         when: When::Post,
                         shell: *self,
-                        path: fish_config_dir.join("99_fig_post.fish"),
+                        path: fish_config_dir.join("99_zevu_post.fish"),
                     }),
                 ]
-            }
+            },
             Shell::Nu => vec![],
         };
 
@@ -175,26 +186,26 @@ impl ShellExt for Shell {
             (Shell::Zsh, When::Post) => include_str!("scripts/post.zsh"),
             (Shell::Bash, When::Pre) => {
                 concat!(
-                    "function __tcomp_source_bash_preexec() {\n",
+                    "function __fig_source_bash_preexec() {\n",
                     include_str!("scripts/bash-preexec.sh"),
                     "}\n",
-                    "__tcomp_source_bash_preexec\n",
+                    "__fig_source_bash_preexec\n",
                     "# shellcheck disable=SC2329\n",
                     "function __bp_adjust_histcontrol() { :; }\n",
                     include_str!("scripts/pre.sh")
                 )
-            }
+            },
             (Shell::Bash, When::Post) => {
                 concat!(
-                    "function __tcomp_source_bash_preexec() {\n",
+                    "function __fig_source_bash_preexec() {\n",
                     include_str!("scripts/bash-preexec.sh"),
                     "}\n",
-                    "__tcomp_source_bash_preexec\n",
+                    "__fig_source_bash_preexec\n",
                     "# shellcheck disable=SC2329\n",
                     "function __bp_adjust_histcontrol() { :; }\n",
                     include_str!("scripts/post.bash")
                 )
-            }
+            },
             (Shell::Nu, When::Pre) => include_str!("scripts/pre.nu"),
             (Shell::Nu, When::Post) => include_str!("scripts/post.nu"),
         };
@@ -284,9 +295,9 @@ impl ShellScriptShellIntegration {
             } else {
                 let add_to_path_line = match self.shell {
                     Shell::Bash | Shell::Zsh => indoc::indoc! {r#"
-                        _TCOMP_LOCAL_BIN="$HOME/.local/bin"
-                        [[ ":$PATH:" != *":$_TCOMP_LOCAL_BIN:"* ]] && PATH="${PATH:+"$PATH:"}$_TCOMP_LOCAL_BIN"
-                        unset _TCOMP_LOCAL_BIN
+                        _Q_LOCAL_BIN="$HOME/.local/bin"
+                        [[ ":$PATH:" != *":$_Q_LOCAL_BIN:"* ]] && PATH="${PATH:+"$PATH:"}$_Q_LOCAL_BIN"
+                        unset _Q_LOCAL_BIN
                     "#},
                     Shell::Fish => "contains $HOME/.local/bin $PATH; or set -a PATH $HOME/.local/bin",
                     Shell::Nu => "",
@@ -319,7 +330,11 @@ impl Integration for ShellScriptShellIntegration {
     }
 
     async fn uninstall(&self) -> Result<()> {
-        self.get_file_integration().uninstall().await
+        match self.get_file_integration().is_installed().await {
+            Ok(()) => self.get_file_integration().uninstall().await,
+            Err(Error::FileDoesNotExist(_)) => Ok(()),
+            Err(err) => Err(err),
+        }
     }
 
     fn describe(&self) -> String {
@@ -361,21 +376,6 @@ impl DotfileShellIntegration {
         self.dotfile_directory.join(self.dotfile_name)
     }
 
-    fn legacy_script_integration(&self, when: When) -> Result<ShellScriptShellIntegration> {
-        let integration_file_name = format!(
-            "{}.{}.{}",
-            Regex::new(r"^\.").unwrap().replace_all(self.dotfile_name, ""),
-            when,
-            self.shell
-        );
-        Ok(ShellScriptShellIntegration {
-            shell: self.shell,
-            when,
-            path: directories::old_fig_data_dir()?
-                .join("shell")
-                .join(integration_file_name),
-        })
-    }
 
     fn script_integration(&self, when: When) -> Result<ShellScriptShellIntegration> {
         let integration_file_name = format!(
@@ -399,50 +399,6 @@ impl DotfileShellIntegration {
         }
     }
 
-    fn legacy_description(when: When) -> String {
-        match when {
-            When::Pre => "# CodeWhisperer pre block. Keep at the top of this file.",
-            When::Post => "# CodeWhisperer post block. Keep at the bottom of this file.",
-        }
-        .into()
-    }
-
-    fn legacy_regexes(&self, _when: When) -> Result<RegexSet> {
-        // The fork owns only its own integration. Never migrate or remove Fig/Q hooks.
-        Ok(RegexSet::empty())
-    }
-
-    fn legacy_source_text_1(&self, when: When) -> Result<String> {
-        let home = directories::home_dir()?;
-        let integration_path = self.script_integration(when)?.path;
-        let path = integration_path.strip_prefix(home)?;
-        Ok(format!(". \"$HOME/{}\"", path.display()))
-    }
-
-    fn legacy_source_text_2(&self, when: When) -> Result<String> {
-        let home = directories::home_dir()?;
-        let integration_path = self.script_integration(when)?.path;
-        let path = format!("\"$HOME/{}\"", integration_path.strip_prefix(home)?.display());
-
-        match self.shell {
-            Shell::Fish => Ok(format!("if test -f {path}; . {path}; end")),
-            _ => Ok(format!("[[ -f {path} ]] && . {path}")),
-        }
-    }
-
-    fn legacy_source_text_3(&self, when: When) -> Result<String> {
-        let home = directories::home_dir()?;
-        let integration_path = self.legacy_script_integration(when)?.path;
-        let path = regex::escape(&format!(
-            "\"${{HOME}}/{}\"",
-            integration_path.strip_prefix(home)?.display()
-        ));
-
-        match self.shell {
-            Shell::Fish => Ok(format!(r"test\s*\-f\s*{path};\s*and\s+builtin\s+source\s+{path}")),
-            _ => Ok(format!(r"\[\[\s*\-f\s*{path}\s*\]\]\s*&&\s*builtin\s+source\s*{path}")),
-        }
-    }
 
     fn source_text(&self, when: When) -> Result<String> {
         let home = directories::home_dir()?;
@@ -456,44 +412,25 @@ impl DotfileShellIntegration {
     }
 
     fn source_regex(&self, when: When, constrain_position: bool) -> Result<Regex> {
-        let regex = format!(
-            r#"{}(?:{}\n)?{}\n{{0,2}}{}"#,
-            if constrain_position && when == When::Pre {
-                "^"
-            } else {
-                ""
-            },
-            regex::escape(&self.description(when)),
-            regex::escape(&self.source_text(when)?),
-            if constrain_position && when == When::Post {
-                "$"
-            } else {
-                ""
-            },
-        );
-        Ok(Regex::new(&regex)?)
+        let block = match when {
+            When::Pre => format!("{}\n{}\n", self.description(when), self.source_text(when)?),
+            When::Post => format!("\n{}\n{}\n", self.description(when), self.source_text(when)?),
+        };
+        Ok(Regex::new(&format!(
+            "{}{}{}",
+            if constrain_position && when == When::Pre { r"\A(?:#![^\n]*\n)?" } else { "" },
+            regex::escape(&block),
+            if constrain_position && when == When::Post { r"\z" } else { "" },
+        ))?)
     }
 
-    fn remove_from_text(&self, text: impl Into<String>, when: When) -> Result<String> {
-        let source_regex = self.source_regex(when, false)?;
-        let mut regexes = vec![source_regex];
-        regexes.extend(
-            self.legacy_regexes(when)?
-                .patterns()
-                .iter()
-                .map(|r| Regex::new(r).unwrap()),
-        );
-        Ok(regexes
-            .iter()
-            .fold::<String, _>(text.into(), |acc, reg| reg.replace_all(&acc, "").into()))
+    fn remove_from_text(&self, text: String, when: When) -> Result<String> {
+        Ok(self.source_regex(when, false)?.replace_all(&text, "").into_owned())
     }
 
     fn matches_text(&self, text: &str, when: When) -> Result<()> {
         let dotfile = self.dotfile_path();
-        if self.legacy_regexes(when)?.is_match(text) {
-            let message = format!("{} has legacy {} integration.", dotfile.display(), when);
-            return Err(Error::LegacyInstallation(message.into()));
-        }
+        remove_legacy_zevu_block(text)?;
         if !self.source_regex(when, false)?.is_match(text) {
             let message = format!("{} does not source {} integration", dotfile.display(), when);
             return Err(Error::NotInstalled(message.into()));
@@ -514,51 +451,73 @@ impl DotfileShellIntegration {
         Ok(())
     }
 
-    fn old_brand_regex(&self, when: When) -> Result<String> {
-        Ok(format!(
-            r#"(?m)(?:\s*{}\s*\n)?^\s*{}\s*\n{{0,2}}"#,
-            regex::escape(&DotfileShellIntegration::legacy_description(when)),
-            self.legacy_source_text_3(when)?,
-        ))
+    fn profile_contents(&self) -> Result<String> {
+        match std::fs::read_to_string(self.dotfile_path()).with_path(self.path()) {
+            Ok(contents) => {
+                remove_legacy_zevu_block(&contents)?;
+                Ok(contents)
+            },
+            Err(Error::Io(err)) if err.kind() == ErrorKind::NotFound => Ok(String::new()),
+            Err(err) => Err(err),
+        }
     }
 
-    async fn install_inner(&self) -> Result<()> {
-        let dotfile = self.dotfile_path();
-        let mut contents = if dotfile.exists() {
-            backup_file(&dotfile, fig_util::directories::utc_backup_dir().ok())?;
-            self.uninstall().await?;
-            std::fs::read_to_string(&dotfile)?
-        } else {
-            String::new()
-        };
-
-        let original_contents = contents.clone();
-
+    fn without_owned_blocks(&self, original: &str) -> Result<String> {
+        let mut contents = remove_legacy_zevu_block(original)?.into_owned();
         if self.pre {
-            self.script_integration(When::Pre)?.install().await?;
-            let (shebang, post_shebang) = split_shebang(&contents);
-            contents = format!(
-                "{}{}\n{}\n{}",
-                shebang,
-                self.description(When::Pre),
-                self.source_text(When::Pre)?,
-                post_shebang,
-            );
+            contents = self.remove_from_text(contents, When::Pre)?;
         }
-
         if self.post {
-            self.script_integration(When::Post)?.install().await?;
-            contents = format!(
-                "{}\n{}\n{}\n",
-                contents,
-                self.description(When::Post),
-                self.source_text(When::Post)?,
-            );
+            contents = self.remove_from_text(contents, When::Post)?;
         }
+        Ok(contents)
+    }
 
-        if contents.ne(&original_contents) {
-            let mut file = File::create(&dotfile).with_path(self.path())?;
-            file.write_all(contents.as_bytes())?;
+    fn installed_contents(&self, original: &str) -> Result<String> {
+        let mut contents = self.without_owned_blocks(original)?;
+        if self.pre {
+            let (shebang, rest) = split_shebang(&contents);
+            contents = format!("{shebang}{}\n{}\n{rest}", self.description(When::Pre), self.source_text(When::Pre)?);
+        }
+        if self.post {
+            contents = format!("{contents}\n{}\n{}\n", self.description(When::Post), self.source_text(When::Post)?);
+        }
+        Ok(contents)
+    }
+
+    #[cfg(test)]
+    fn install_profile(&self, backup_dir: &Path) -> Result<()> {
+        let original = self.profile_contents()?;
+        let contents = self.installed_contents(&original)?;
+        self.write_profile(&original, &contents, backup_dir)
+    }
+
+    fn uninstall_profile(&self, backup_dir: &Path) -> Result<()> {
+        let original = self.profile_contents()?;
+        let contents = self.without_owned_blocks(&original)?;
+        self.write_profile(&original, &contents, backup_dir)
+    }
+
+    fn prepare_profile(&self, original: &str, contents: &str) -> Result<Option<(tempfile::NamedTempFile, PathBuf)>> {
+        if original == contents {
+            return Ok(None);
+        }
+        let target = writable_target(&self.dotfile_path())?;
+        let parent = target.parent().ok_or_else(|| Error::Custom("Profile has no parent directory".into()))?;
+        std::fs::create_dir_all(parent).with_path(parent)?;
+        let mut file = tempfile::NamedTempFile::new_in(parent).with_path(parent)?;
+        if let Ok(metadata) = std::fs::metadata(&target) {
+            file.as_file().set_permissions(metadata.permissions()).with_path(&target)?;
+        }
+        file.write_all(contents.as_bytes()).with_path(&target)?;
+        file.as_file().sync_all().with_path(&target)?;
+        Ok(Some((file, target)))
+    }
+
+    fn write_profile(&self, original: &str, contents: &str, backup_dir: &Path) -> Result<()> {
+        if let Some((file, target)) = self.prepare_profile(original, contents)? {
+            backup_file(self.dotfile_path(), Some(backup_dir))?;
+            file.persist(&target).map_err(|err| err.error).with_path(&target)?;
         }
         Ok(())
     }
@@ -577,47 +536,55 @@ impl Integration for DotfileShellIntegration {
     }
 
     async fn install(&self) -> Result<()> {
+        let original = self.profile_contents()?;
         if self.is_installed().await.is_ok() {
             return Ok(());
         }
-        self.install_inner().await?;
+        let contents = self.installed_contents(&original)?;
+        // Check every destination before staging the profile or changing any file.
+        writable_target(&self.dotfile_path())?;
+        let scripts = [When::Pre, When::Post]
+            .into_iter()
+            .filter(|when| match when { When::Pre => self.pre, When::Post => self.post })
+            .map(|when| self.script_integration(when))
+            .collect::<Result<Vec<_>>>()?;
+        for script in &scripts {
+            writable_target(&script.path)?;
+        }
+        let prepared = self.prepare_profile(&original, &contents)?;
+        let backup_dir = directories::utc_backup_dir()?;
+        if prepared.is_some() {
+            backup_file(self.dotfile_path(), Some(&backup_dir))?;
+        }
+        for script in scripts {
+            script.install().await?;
+        }
+        if let Some((file, target)) = prepared {
+            file.persist(&target).map_err(|err| err.error).with_path(&target)?;
+        }
         Ok(())
     }
 
     async fn uninstall(&self) -> Result<()> {
-        let dotfile = self.dotfile_path();
-        if dotfile.exists() {
-            let mut contents = std::fs::read_to_string(&dotfile)?;
-
-            // Remove comment lines
-            contents = Regex::new(r"(?mi)^#.*fig.*var.*$\n?")?
-                .replace_all(&contents, "")
-                .into();
-
-            contents = Regex::new(r"(?mi)^#.*Please make sure this block is at the .* of this file.*$\n?")?
-                .replace_all(&contents, "")
-                .into();
-
-            if self.pre {
-                contents = self.remove_from_text(&contents, When::Pre)?;
+        self.profile_contents()?;
+        let mut scripts = Vec::new();
+        for when in [When::Pre, When::Post] {
+            if !match when { When::Pre => self.pre, When::Post => self.post } {
+                continue;
             }
-
-            if self.post {
-                contents = self.remove_from_text(&contents, When::Post)?;
+            let script = self.script_integration(when)?;
+            match script.is_installed().await {
+                Ok(()) => {
+                    writable_target(&script.path)?;
+                    scripts.push(script);
+                },
+                Err(Error::FileDoesNotExist(_)) => {},
+                Err(err) => return Err(err),
             }
-
-            contents = contents.trim().to_string();
-            contents.push('\n');
-
-            std::fs::write(&dotfile, contents.as_bytes()).with_path(self.path())?;
         }
-
-        if self.pre {
-            self.script_integration(When::Pre)?.uninstall().await?;
-        }
-
-        if self.post {
-            self.script_integration(When::Post)?.uninstall().await?;
+        self.uninstall_profile(&directories::utc_backup_dir()?)?;
+        for script in scripts {
+            script.uninstall().await?;
         }
 
         Ok(())
@@ -626,37 +593,22 @@ impl Integration for DotfileShellIntegration {
     async fn is_installed(&self) -> Result<()> {
         let dotfile = self.dotfile_path();
 
-        let filtered_contents: String = match std::fs::read_to_string(&dotfile).with_path(&dotfile) {
-            // Remove comments and empty lines.
-            Ok(contents) => {
-                // Check for existence of ignore flag
-                if Regex::new(r"(?mi)^\s*#\s*fig ignore\s?.*$")
-                    .unwrap()
-                    .is_match(&contents)
-                {
-                    return Ok(());
-                }
-
-                Regex::new(r"(?m)^\s*(#.*)?\n")
-                    .unwrap()
-                    .replace_all(&contents, "")
-                    .into()
-            }
-            Err(Error::Io(err)) if err.kind() == ErrorKind::NotFound => {
-                return Err(Error::FileDoesNotExist(dotfile.into()));
-            }
-            Err(err) => return Err(err),
-        };
-
-        let filtered_contents = filtered_contents.trim();
+        let contents = std::fs::read_to_string(&dotfile).with_path(&dotfile)?;
+        if !matches!(remove_legacy_zevu_block(&contents)?, Cow::Borrowed(_)) {
+            return Err(Error::LegacyInstallation("Legacy Zevu hook is still installed".into()));
+        }
+        // Only Zevu's explicit opt-out applies; other applications' markers are untouched.
+        if Regex::new(r"(?mi)^\s*#\s*zevu ignore\s?.*$")?.is_match(&contents) {
+            return Ok(());
+        }
 
         if self.pre {
-            self.matches_text(filtered_contents, When::Pre)?;
+            self.matches_text(&contents, When::Pre)?;
             self.script_integration(When::Pre)?.is_installed().await?;
         }
 
         if self.post {
-            self.matches_text(filtered_contents, When::Post)?;
+            self.matches_text(&contents, When::Post)?;
             self.script_integration(When::Post)?.is_installed().await?;
         }
 
@@ -664,14 +616,7 @@ impl Integration for DotfileShellIntegration {
     }
 
     async fn migrate(&self) -> Result<()> {
-        match self.is_installed().await {
-            Ok(_) => Ok(()),
-            Err(Error::LegacyInstallation(_)) => {
-                self.install_inner().await?;
-                Ok(())
-            }
-            Err(err) => Err(err),
-        }
+        self.install().await
     }
 }
 
@@ -687,6 +632,77 @@ impl ShellIntegration for DotfileShellIntegration {
     fn file_name(&self) -> &str {
         self.dotfile_name
     }
+}
+
+/// Resolve only the final file's symlinks, keeping profile links and their targets intact.
+/// Opening without truncation checks file permissions before any replacement is staged.
+fn writable_target(path: &Path) -> Result<PathBuf> {
+    let mut target = path.to_path_buf();
+    for _ in 0..40 {
+        match std::fs::symlink_metadata(&target) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                let link = std::fs::read_link(&target).with_path(&target)?;
+                target = if link.is_absolute() { link } else { target.parent().unwrap().join(link) };
+            },
+            Ok(_) => {
+                std::fs::OpenOptions::new().write(true).open(&target).with_path(&target)?;
+                #[cfg(unix)]
+                if let Some(parent) = target.parent() {
+                    nix::unistd::access(parent, nix::unistd::AccessFlags::W_OK | nix::unistd::AccessFlags::X_OK)
+                        .map_err(std::io::Error::from).with_path(parent)?;
+                }
+                return Ok(target);
+            },
+            Err(err) if err.kind() == ErrorKind::NotFound => {
+                let mut ancestor = target.parent();
+                while let Some(parent) = ancestor {
+                    if parent.exists() {
+                        #[cfg(unix)]
+                        nix::unistd::access(parent, nix::unistd::AccessFlags::W_OK | nix::unistd::AccessFlags::X_OK)
+                            .map_err(std::io::Error::from).with_path(parent)?;
+                        return Ok(target);
+                    }
+                    ancestor = parent.parent();
+                }
+                return Err(Error::Custom("Integration path has no existing parent".into()));
+            },
+            Err(err) => return Err(err).with_path(&target),
+        }
+    }
+    Err(Error::Custom("Too many profile symlinks".into()))
+}
+
+/// Remove only the complete, former Zevu hook. Validate all markers before mutation.
+fn remove_legacy_zevu_block(contents: &str) -> Result<Cow<'_, str>> {
+    const START: &str = "# >>> Zevu autocomplete >>>";
+    const END: &str = "# <<< Zevu autocomplete <<<";
+    let mut start = None;
+    let mut ranges = Vec::new();
+    let mut offset = 0;
+    for line in contents.split_inclusive('\n') {
+        let marker = line.trim_end_matches(['\r', '\n']);
+        match marker {
+            START if start.is_none() => start = Some(offset),
+            END if start.is_some() => ranges.push((start.take().unwrap(), offset + line.len())),
+            START | END => return Err(Error::Custom("Malformed or nested legacy Zevu hook markers".into())),
+            _ => {},
+        }
+        offset += line.len();
+    }
+    if start.is_some() {
+        return Err(Error::Custom("Unclosed legacy Zevu hook marker".into()));
+    }
+    if ranges.is_empty() {
+        return Ok(Cow::Borrowed(contents));
+    }
+    let mut result = String::with_capacity(contents.len());
+    let mut cursor = 0;
+    for (start, end) in ranges {
+        result.push_str(&contents[cursor..start]);
+        cursor = end;
+    }
+    result.push_str(&contents[cursor..]);
+    Ok(Cow::Owned(result))
 }
 
 /// Splits the line containing the shebang (if any) with the rest of the string.
@@ -705,10 +721,12 @@ fn split_shebang(contents: &str) -> (&str, &str) {
 #[cfg(test)]
 mod test {
     use std::io::Write;
-    use std::process::{Command, Stdio};
+    use std::process::{
+        Command,
+        Stdio,
+    };
 
     use fig_util::build::SKIP_SHELLCHECK_TESTS;
-    use fig_util::directories::{home_dir, old_fig_data_dir};
 
     use super::*;
 
@@ -764,69 +782,188 @@ mod test {
         check_script(Shell::Bash, When::Post);
     }
 
+
+    fn profile(root: &Path, shell: Shell, name: &'static str) -> DotfileShellIntegration {
+        DotfileShellIntegration {
+            shell,
+            pre: true,
+            post: true,
+            dotfile_directory: root.to_path_buf(),
+            dotfile_name: name,
+        }
+    }
+
     #[test]
-    fn test_legacy_codewhisperer_regex() {
-        let re = regex::Regex::new(
-            &DotfileShellIntegration {
-                pre: true,
-                post: true,
-                shell: Shell::Zsh,
-                dotfile_directory: "".into(),
-                dotfile_name: ".zshrc",
+    fn profile_install_reinstall_uninstall_preserves_user_bytes_and_foreign_hooks() {
+        let user = "#!/bin/zsh\n# Fig pre block. Keep at the top of this file.\r\n\
+                    [[ -f ~/.fig/shell/zshrc.pre.zsh ]] && source ~/.fig/shell/zshrc.pre.zsh\r\n\
+                    # Amazon Q post block. Keep at the bottom of this file.\n\
+                    export USER_VALUE='résumé'\r\n\n# foreign footer without newline";
+        for (shell, name) in [(Shell::Zsh, ".zshrc"), (Shell::Zsh, ".zprofile"), (Shell::Bash, ".bashrc"),
+                              (Shell::Bash, ".bash_profile"), (Shell::Bash, ".bash_login"), (Shell::Bash, ".profile")] {
+            let root = tempfile::tempdir().unwrap();
+            let integration = profile(root.path(), shell, name);
+            let backups = root.path().join("backups");
+            std::fs::write(integration.path(), user.as_bytes()).unwrap();
+            integration.install_profile(&backups).unwrap();
+            let installed = std::fs::read(integration.path()).unwrap();
+            integration.install_profile(&backups).unwrap();
+            assert_eq!(std::fs::read(integration.path()).unwrap(), installed);
+            let text = String::from_utf8(installed).unwrap();
+            assert_eq!(text.matches("# Zevu pre block.").count(), 1);
+            assert_eq!(text.matches("# Zevu post block.").count(), 1);
+            integration.uninstall_profile(&backups).unwrap();
+            integration.uninstall_profile(&backups).unwrap();
+            assert_eq!(std::fs::read(integration.path()).unwrap(), user.as_bytes());
+            assert_eq!(std::fs::read(backups.join(name)).unwrap(), user.as_bytes());
+        }
+    }
+
+    #[test]
+    fn legacy_zevu_hook_removal_backs_up_and_preserves_outside_bytes() {
+        let root = tempfile::tempdir().unwrap();
+        let integration = profile(root.path(), Shell::Zsh, ".zshrc");
+        let backups = root.path().join("backups");
+        let before = "export BEFORE='α'\r\n\n";
+        let after = "\r\n# Amazon Q hook remains\nexport AFTER=1";
+        let original = format!("{before}# >>> Zevu autocomplete >>>\r\nold helper\n# <<< Zevu autocomplete <<<\r\n{after}");
+        std::fs::write(integration.path(), original.as_bytes()).unwrap();
+        integration.install_profile(&backups).unwrap();
+        let installed = std::fs::read(integration.path()).unwrap();
+        integration.install_profile(&backups).unwrap();
+        assert_eq!(std::fs::read(integration.path()).unwrap(), installed);
+        assert!(!String::from_utf8(installed).unwrap().contains("old helper"));
+        integration.uninstall_profile(&backups).unwrap();
+        assert_eq!(std::fs::read(integration.path()).unwrap(), format!("{before}{after}").as_bytes());
+        assert_eq!(std::fs::read(backups.join(".zshrc")).unwrap(), original.as_bytes());
+    }
+
+    #[tokio::test]
+    async fn malformed_legacy_markers_never_mutate_profile_or_create_backup() {
+        for contents in [
+            "# >>> Zevu autocomplete >>>\nmissing end",
+            "before\n# <<< Zevu autocomplete <<<\nafter",
+            "# >>> Zevu autocomplete >>>\n# >>> Zevu autocomplete >>>\n# <<< Zevu autocomplete <<<\n",
+            "# >>> Zevu autocomplete >>>\n# <<< Zevu autocomplete <<<\n# <<< Zevu autocomplete <<<",
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let integration = profile(root.path(), Shell::Zsh, ".zshrc");
+            let backups = root.path().join("backups");
+            std::fs::write(integration.path(), contents).unwrap();
+            assert!(integration.install().await.is_err());
+            assert!(integration.uninstall().await.is_err());
+            assert!(integration.install_profile(&backups).is_err());
+            assert!(integration.uninstall_profile(&backups).is_err());
+            assert_eq!(std::fs::read(integration.path()).unwrap(), contents.as_bytes());
+            assert!(!backups.exists());
+        }
+    }
+
+    #[test]
+    fn custom_zdotdir_and_missing_directories_stay_isolated() {
+        let root = tempfile::tempdir().unwrap();
+        let zdotdir = root.path().join("custom/zsh");
+        let env = Env::from_slice(&[("ZDOTDIR", zdotdir.to_str().unwrap())]);
+        let integrations = Shell::Zsh.get_shell_integrations(&env).unwrap();
+        assert_eq!(integrations.len(), 2);
+        for integration in integrations {
+            assert!(integration.path().starts_with(&zdotdir));
+        }
+        let integration = profile(&zdotdir, Shell::Zsh, ".zshrc");
+        integration.install_profile(&root.path().join("backups")).unwrap();
+        assert!(integration.path().is_file());
+        integration.uninstall_profile(&root.path().join("backups")).unwrap();
+        assert!(std::fs::read(integration.path()).unwrap().is_empty());
+        assert!(!root.path().join(".zshrc").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn profile_links_keep_relative_absolute_and_dangling_targets() {
+        use std::os::unix::fs::symlink;
+        for relative in [true, false] {
+            for existing in [true, false] {
+                let root = tempfile::tempdir().unwrap();
+                let target = root.path().join("managed/config/zshrc");
+                let link = if relative { PathBuf::from("managed/config/zshrc") } else { target.clone() };
+                let integration = profile(root.path(), Shell::Zsh, ".zshrc");
+                let user = if existing { "export KEEP=1\r\n" } else { "" };
+                if existing {
+                    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+                    std::fs::write(&target, user).unwrap();
+                }
+                symlink(&link, integration.path()).unwrap();
+                let backups = root.path().join("backups");
+                integration.install_profile(&backups).unwrap();
+                integration.install_profile(&backups).unwrap();
+                assert_eq!(std::fs::read_link(integration.path()).unwrap(), link);
+                integration.uninstall_profile(&backups).unwrap();
+                assert_eq!(std::fs::read_link(integration.path()).unwrap(), link);
+                assert_eq!(std::fs::read(&target).unwrap(), user.as_bytes());
             }
-            .old_brand_regex(When::Pre)
-            .unwrap(),
-        )
-        .unwrap();
+        }
+    }
 
-        println!("re: {re}");
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn permission_denied_leaves_profile_and_backup_untouched() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let integration = profile(root.path(), Shell::Zsh, ".zshrc");
+        let user = "# >>> Zevu autocomplete >>>\nold\n# <<< Zevu autocomplete <<<\nkeep\n";
+        std::fs::write(integration.path(), user).unwrap();
+        std::fs::set_permissions(integration.path(), std::fs::Permissions::from_mode(0o400)).unwrap();
+        let backups = root.path().join("backups");
+        assert!(integration.install().await.is_err());
+        assert!(integration.uninstall().await.is_err());
+        assert!(integration.install_profile(&backups).is_err());
+        assert!(integration.uninstall_profile(&backups).is_err());
+        assert_eq!(std::fs::read(integration.path()).unwrap(), user.as_bytes());
+        assert!(!backups.exists());
+    }
 
-        let data_dir = old_fig_data_dir().unwrap();
-        let dir = data_dir.strip_prefix(home_dir().unwrap()).unwrap().display();
+    #[tokio::test]
+    async fn fish_scripts_round_trip_without_touching_foreign_conf() {
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("xdg");
+        let env = Env::from_slice(&[("XDG_CONFIG_HOME", config.to_str().unwrap())]);
+        let integrations = Shell::Fish.get_shell_integrations(&env).unwrap();
+        let conf = config.join("fish/conf.d");
+        std::fs::create_dir_all(&conf).unwrap();
+        for foreign in ["00_fig_pre.fish", "00_q_pre.fish", "user.fish"] {
+            std::fs::write(conf.join(foreign), format!("# keep {foreign}\r\n")).unwrap();
+        }
+        for integration in &integrations {
+            integration.install().await.unwrap();
+            let installed = std::fs::read(integration.path()).unwrap();
+            integration.install().await.unwrap();
+            assert_eq!(std::fs::read(integration.path()).unwrap(), installed);
+            integration.uninstall().await.unwrap();
+            integration.uninstall().await.unwrap();
+            assert!(!integration.path().exists());
+        }
+        for foreign in ["00_fig_pre.fish", "00_q_pre.fish", "user.fish"] {
+            assert_eq!(std::fs::read(conf.join(foreign)).unwrap(), format!("# keep {foreign}\r\n").as_bytes());
+        }
+        let owned_path = conf.join("00_zevu_pre.fish");
+        std::fs::write(&owned_path, "# user-owned conflict\n").unwrap();
+        assert!(integrations[0].uninstall().await.is_err());
+        assert_eq!(std::fs::read_to_string(owned_path).unwrap(), "# user-owned conflict\n");
+    }
 
-        // base case
-        let doc = &indoc::formatdoc! {r#"
-            # CodeWhisperer pre block. Keep at the top of this file.
-            [[ -f "${{HOME}}/{dir}/shell/zshrc.pre.zsh" ]] && builtin source "${{HOME}}/{dir}/shell/zshrc.pre.zsh"
-        "#};
-        let replaced = re.replace_all(doc, "");
-        assert_eq!(replaced, "");
-
-        // different comment case
-        let doc = indoc::formatdoc! {r#"
-            # different comment
-            [[ -f "${{HOME}}/{dir}/shell/zshrc.pre.zsh" ]] && builtin source "${{HOME}}/{dir}/shell/zshrc.pre.zsh"
-        "#};
-        let replaced = re.replace_all(&doc, "");
-        assert_eq!(replaced, "# different comment\n");
-
-        // spaces in command
-        let doc = indoc::formatdoc! {r#"
-            [[  -f  "${{HOME}}/{dir}/shell/zshrc.pre.zsh"  ]]  &&    builtin  source  "${{HOME}}/{dir}/shell/zshrc.pre.zsh" 
-        "#};
-        let replaced = re.replace_all(&doc, "");
-        assert_eq!(replaced, "");
-
-        // non match which looks similar
-        let doc = indoc::formatdoc! {r#"
-            [[ -f "${{HOME}}/{dir}/shell/zshrc.pre.zsh" ]] && source "${{HOME}}/{dir}/shell/zshrc.pre.zsh"
-            
-            # CodeWhisperer pre block. Keep at the top of this file.
-            [[ -f ${{HOME}}/shell/zshrc.pre.zsh" ]] && builtin source "${{HOME}}/shell/zshrc.pre.zsh"
-        "#};
-        let replaced = re.replace_all(&doc, "");
-        assert_eq!(replaced, doc);
-
-        // multiple lines
-        let doc = indoc::formatdoc! {r#"
-            # CodeWhisperer pre block. Keep at the top of this file.
-            [[ -f "${{HOME}}/{dir}/shell/zshrc.pre.zsh" ]] && builtin source "${{HOME}}/{dir}/shell/zshrc.pre.zsh"
-            [[ -f "${{HOME}}/{dir}/shell/zshrc.pre.zsh" ]] && builtin source "${{HOME}}/{dir}/shell/zshrc.pre.zsh"
-
-            [[ -f "${{HOME}}/{dir}/shell/zshrc.pre.zsh" ]] && builtin source "${{HOME}}/{dir}/shell/zshrc.pre.zsh"
-        "#};
-        let replaced = re.replace_all(&doc, "");
-        assert_eq!(replaced, "");
+    #[cfg(unix)]
+    #[test]
+    fn executable_shell_discovery_rejects_nonexecutable_files() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let shell = root.path().join("nu");
+        std::fs::write(&shell, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let env = Env::from_slice(&[("PATH", root.path().to_str().unwrap())]);
+        assert_ne!(shell_executable(Shell::Nu, &env), Some(shell.clone()));
+        std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(shell_executable(Shell::Nu, &env), Some(shell));
+        assert!(Shell::all().contains(&Shell::Nu));
     }
 
     #[test]

@@ -72,7 +72,6 @@ export default defineConfig(({ mode, command }) => {
     },
     build: {
       target: command === "build" ? "es2017" : "esnext",
-      // TODO: re-enable prod source maps to upload them to sentry (see build CIs)
       sourcemap: command !== "build",
       rollupOptions: {
         external: [

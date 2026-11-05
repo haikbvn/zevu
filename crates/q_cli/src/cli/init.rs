@@ -1,6 +1,9 @@
 use std::borrow::Cow;
 use std::fmt::Display;
-use std::io::{Write, stdout};
+use std::io::{
+    Write,
+    stdout,
+};
 use std::path::Path;
 use std::process::ExitCode;
 use std::sync::LazyLock;
@@ -8,10 +11,19 @@ use std::sync::LazyLock;
 use clap::Args;
 use crossterm::style::Stylize;
 use eyre::Result;
-use fig_integrations::shell::{ShellExt, When};
+use fig_integrations::shell::{
+    ShellExt,
+    When,
+};
 use fig_os_shim::Context;
-use fig_util::env_var::TCOMP_SHELL;
-use fig_util::{CLI_BINARY_NAME, PRODUCT_NAME, Shell, Terminal, get_parent_process_exe};
+use fig_util::env_var::Q_SHELL;
+use fig_util::{
+    CLI_BINARY_NAME,
+    PRODUCT_NAME,
+    Shell,
+    Terminal,
+    get_parent_process_exe,
+};
 use indoc::formatdoc;
 
 use super::internal::should_figterm_launch::should_figterm_launch_exit_status;
@@ -83,13 +95,13 @@ fn guard_source(
             for line in source.into().lines() {
                 output.push(format!("  {line}").into());
             }
-        }
+        },
         GuardAssignment::AfterSourcing => {
             for line in source.into().lines() {
                 output.push(format!("  {line}").into());
             }
             output.push(format!("  {shell_var}").into());
-        }
+        },
     }
 
     output.push(
@@ -119,7 +131,7 @@ async fn shell_init(shell: &Shell, when: &When, rcfile: &Option<String>) -> Resu
     if let Some(parent_process) = get_parent_process_exe() {
         to_source.push(assign_shell_variable(
             shell,
-            TCOMP_SHELL,
+            Q_SHELL,
             if *IS_SNAPSHOT_TEST {
                 Path::new("/bin/zsh").display()
             } else {
@@ -135,20 +147,21 @@ async fn shell_init(shell: &Shell, when: &When, rcfile: &Option<String>) -> Resu
         } else {
             should_figterm_launch_exit_status(&Context::new(), true)
         };
-        to_source.push(assign_shell_variable(shell, "SHOULD_TCOMP_PTY_LAUNCH", status, false));
+        to_source.push(assign_shell_variable(shell, "SHOULD_QTERM_LAUNCH", status, false));
     }
+
 
     let is_jetbrains_terminal = Terminal::is_jetbrains_terminal();
 
     if when == &When::Pre && shell == &Shell::Bash && is_jetbrains_terminal {
         // JediTerm does not launch as a 'true' login shell, so our normal "shopt -q login_shell" check does
-        // not work. Thus, TCOMP_IS_LOGIN_SHELL will be incorrect. We must manually set it so the
+        // not work. Thus, Q_IS_LOGIN_SHELL will be incorrect. We must manually set it so the
         // user's bash_profile is sourced. https://github.com/JetBrains/intellij-community/blob/master/plugins/terminal/resources/jediterm-bash.in
-        to_source.push("TCOMP_IS_LOGIN_SHELL=1".into());
+        to_source.push("Q_IS_LOGIN_SHELL=1".into());
     }
 
     if let Some(path) = fig_settings::settings::get_string_opt("qterm.path") {
-        to_source.push(assign_shell_variable(shell, "TCOMP_TERM_PATH", path, false));
+        to_source.push(assign_shell_variable(shell, "Q_TERM_PATH", path, false));
     }
 
     let shell_integration_source = shell.get_fig_integration_source(when);
@@ -192,7 +205,7 @@ async fn shell_init(shell: &Shell, when: &When, rcfile: &Option<String>) -> Resu
             to_source.push(guard_source(
                 shell,
                 false,
-                "TCOMP_JETBRAINS_SHELL_INTEGRATION",
+                "Q_JETBRAINS_SHELL_INTEGRATION",
                 GuardAssignment::BeforeSourcing,
                 source,
             ));
@@ -215,6 +228,7 @@ async fn shell_init(shell: &Shell, when: &When, rcfile: &Option<String>) -> Resu
         }
     }
 
+
     Ok(to_source.join("\n"))
 }
 
@@ -222,7 +236,7 @@ fn shell_integrations_disabled_code(shell: Shell) -> String {
     guard_source(
         &shell,
         false,
-        "TCOMP_SHELL_INTEGRATION_DISABLED",
+        "Q_SHELL_INTEGRATION_DISABLED",
         GuardAssignment::AfterSourcing,
         format!(
             "printf '{PRODUCT_NAME} shell integration is disabled.\\nRe-enable by running: {}\\n'",
@@ -236,20 +250,23 @@ fn input_method_prompt_code(shell: Shell, terminal: &Terminal) -> String {
     guard_source(
         &shell,
         false,
-        "TCOMP_INPUT_METHOD_PROMPT",
+        "Q_INPUT_METHOD_PROMPT",
         GuardAssignment::AfterSourcing,
         format!(
             "printf '\\n🚀 {PRODUCT_NAME} supports {terminal}!\\n\\nEnable integrations with {terminal} by \
              running:\\n  {}\\n\\n'\n",
-            format!("{CLI_BINARY_NAME} install").magenta()
+            format!("{CLI_BINARY_NAME} integrations install input-method").magenta()
         ),
     )
 }
 
-#[allow(dead_code)]
+
 #[cfg(test)]
 mod tests {
-    use std::process::{Command, Stdio};
+    use std::process::{
+        Command,
+        Stdio,
+    };
 
     use super::*;
 
@@ -272,7 +289,7 @@ mod tests {
 
     #[test]
     fn test_prompts() {
-        for shell in [Shell::Bash, Shell::Zsh] {
+        for shell in Shell::all_test() {
             let shell_integrations_disabled_output = run_shell_stdout(&shell, &shell_integrations_disabled_code(shell));
 
             println!("=== shell_integrations_disabled_code {shell:?} ===");
@@ -298,9 +315,10 @@ mod tests {
                 input_method_prompt_output,
                 format!(
                     "\n🚀 {PRODUCT_NAME} supports {terminal}!\n\nEnable integrations with {terminal} by running:\n  {}\n\n",
-                    format!("{CLI_BINARY_NAME} install").magenta()
+                    format!("{CLI_BINARY_NAME} integrations install input-method").magenta()
                 )
             );
+
         }
     }
 }

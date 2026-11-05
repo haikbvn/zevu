@@ -1,8 +1,19 @@
 use fig_proto::fig::server_originated_message::Submessage as ServerOriginatedSubMessage;
-use fig_proto::fig::{GetSettingsPropertyRequest, GetSettingsPropertyResponse, UpdateSettingsPropertyRequest};
-use fig_settings::{JsonStore, OldSettings, settings};
+use fig_proto::fig::{
+    GetSettingsPropertyRequest,
+    GetSettingsPropertyResponse,
+    UpdateSettingsPropertyRequest,
+};
+use fig_settings::{
+    JsonStore,
+    OldSettings,
+    settings,
+};
 
-use super::{RequestResult, RequestResultImpl};
+use super::{
+    RequestResult,
+    RequestResultImpl,
+};
 
 pub async fn get(request: GetSettingsPropertyRequest) -> RequestResult {
     let res = match request.key {
@@ -31,13 +42,13 @@ pub async fn update(request: UpdateSettingsPropertyRequest) -> RequestResult {
         (Some(key), Some(value)) => {
             let value = serde_json::from_str(&value).unwrap_or(serde_json::Value::String(value));
             fig_settings::settings::set_value(key, value).map_err(|err| format!("Failed setting {key}: {err}"))?;
-        }
+        },
         (Some(key), None) => {
             fig_settings::settings::remove_value(key).map_err(|err| format!("Failed removing {key}: {err}"))?;
-        }
+        },
         (None, _) => {
             return RequestResult::error("No key provided with request");
-        }
+        },
     }
 
     RequestResult::success()
