@@ -9,6 +9,8 @@ jobs:
         env:
           ZEVU_DEPS_ONLY: "1"
         run: bash scripts/setup.sh
+      - name: Enable Corepack package manager shims
+        run: mise exec -- corepack enable
       - name: Build signed host bundle and companions
         run: mise exec -- bash scripts/build-macos.sh
       - name: Frontend regression suite
