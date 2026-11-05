@@ -33,7 +33,7 @@ Outputs:
 
 The app contains separate desktop, CLI and PTY executables, the generated `ZevuInputMethod.app`, production frontend assets, the full compiled completion catalogue, its icons/license, and the upstream appearance themes. No Node/pnpm, development server, AWS credentials or chat binary is part of the application runtime. Individual completion generators can require their corresponding installed CLI or network service.
 
-The macOS GitHub Actions job enables Corepack's package-manager shims before building so Turbo can discover the pinned pnpm binary on clean runners.
+The macOS GitHub Actions job enables Corepack's package-manager shims before building so Turbo can discover the pinned pnpm binary on clean runners. The JetBrains Gradle wrapper allows 120 seconds for its distribution download.
 
 ## Local use
 
